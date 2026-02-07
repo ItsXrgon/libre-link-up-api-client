@@ -32,4 +32,3 @@ pub fn map_glucose_data(item: &GlucoseItem) -> LibreCgmData {
         date,
     }
 }
-

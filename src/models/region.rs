@@ -36,13 +36,13 @@ pub enum Region {
 
 impl Region {
     /// Get the base API URL for this region
-    /// 
+    ///
     /// Returns a static string reference (no allocation)
-    /// 
+    ///
     /// # Examples
     /// ```
     /// use libre_link_up_api_client::Region;
-    /// 
+    ///
     /// let url = Region::US.base_url();
     /// assert_eq!(url, "https://api-us.libreview.io");
     /// ```
@@ -66,11 +66,11 @@ impl Region {
     }
 
     /// Convert Region enum to string key (lowercase)
-    /// 
+    ///
     /// # Examples
     /// ```
     /// use libre_link_up_api_client::Region;
-    /// 
+    ///
     /// assert_eq!(Region::US.as_str(), "us");
     /// assert_eq!(Region::EU2.as_str(), "eu2");
     /// ```
@@ -95,17 +95,17 @@ impl Region {
 }
 
 /// Parse a string into a Region (case-insensitive)
-/// 
+///
 /// Returns `Region::Global` for unrecognized region strings
-/// 
+///
 /// # Examples
 /// ```
 /// use std::str::FromStr;
 /// use libre_link_up_api_client::Region;
-/// 
+///
 /// let region = Region::from_str("US").unwrap();
 /// assert_eq!(region, Region::US);
-/// 
+///
 /// let region = Region::from_str("invalid").unwrap();
 /// assert_eq!(region, Region::Global);
 /// ```
