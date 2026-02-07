@@ -1,0 +1,37 @@
+[package]
+name = "libre_link_up_api_client"
+version = "0.1.0"
+edition = "2026"
+rust-version = "1.89"
+authors = ["Ali Koheil <ali.koheil@gmail.com>"]
+description = "Unofficial Rust client for the LibreLinkUp API - fetch CGM data from FreeStyle Libre 2/3 devices"
+documentation = "https://docs.rs/libre_link_up_api_client"
+readme = "README.md"
+homepage = "https://github.com/itsXrgon/libre_link_up_api_client"
+repository = "https://github.com/itsXrgon/libre_link_up_api_client"
+license = "MIT"
+keywords = ["libre", "freestyle", "glucose", "cgm", "diabetes"]
+categories = ["api-bindings", "web-programming::http-client"]
+exclude = ["target/", ".git/", ".github/"]
+
+[dependencies]
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }
+reqwest = { version = "0.13.2", features = ["json", "gzip"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio-test = "0.4"
+dotenvy = "0.15"
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "averaged_reading"
+path = "examples/averaged_reading.rs"
+
