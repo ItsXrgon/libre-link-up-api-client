@@ -1,5 +1,30 @@
+//! Error types for LibreLinkUp API operations
+//!
+//! All errors implement `std::error::Error` and can be converted to/from various error types.
+
 use thiserror::Error;
 
+/// Error types that can occur when using the LibreLinkUp API client
+///
+/// # Examples
+///
+/// ```no_run
+/// use libre_link_up_api_client::{LibreLinkUpClient, LibreLinkUpError};
+///
+/// # async fn example() {
+/// let client = LibreLinkUpClient::simple(
+///     "email@example.com".to_string(),
+///     "password".to_string(),
+///     None,
+/// );
+///
+/// match client {
+///     Ok(c) => println!("Client created"),
+///     Err(LibreLinkUpError::Http(e)) => eprintln!("Network error: {}", e),
+///     Err(e) => eprintln!("Error: {}", e),
+/// }
+/// # }
+/// ```
 #[derive(Debug, Error)]
 pub enum LibreLinkUpError {
     #[error("HTTP error: {0}")]

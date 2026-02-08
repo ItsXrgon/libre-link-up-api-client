@@ -11,7 +11,7 @@ use crate::{
     utils::{TREND_MAP, map_glucose_data},
 };
 use reqwest::{Client, header};
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
@@ -24,21 +24,58 @@ const CONNECTIONS_ENDPOINT: &str = "/llu/connections";
 type ConnectionFn = Arc<dyn Fn(&[Datum]) -> Option<String> + Send + Sync>;
 
 /// Client configuration options
+///
+/// # Examples
+///
+/// ```
+/// use libre_link_up_api_client::{ClientConfig, Region};
+///
+/// let config = ClientConfig {
+///     username: "email@example.com".to_string(),
+///     password: "password".to_string(),
+///     api_version: None,  // Uses default "4.16.0"
+///     region: Some(Region::US),
+///     connection_identifier: None,
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
+    /// Username for LibreLinkUp account
     pub username: String,
+    /// Password for LibreLinkUp account
     pub password: String,
     /// API version (defaults to "4.16.0")
     pub api_version: Option<String>,
-    /// API region (defaults to Global)
+    /// API region (defaults to Global which auto-redirects)
     pub region: Option<Region>,
+    /// Optional connection identifier for multi-patient accounts
     pub connection_identifier: Option<ConnectionIdentifier>,
 }
 
-/// Connection identifier - either by name or by custom function
+/// Connection identifier for multi-patient accounts
+///
+/// Choose a specific patient's data when following multiple people.
+///
+/// # Examples
+///
+/// ```
+/// use libre_link_up_api_client::ConnectionIdentifier;
+///
+/// // By patient name
+/// let by_name = ConnectionIdentifier::ByName("John Doe".to_string());
+///
+/// // By custom function
+/// let by_fn = ConnectionIdentifier::ByFunction(
+///     std::sync::Arc::new(|connections| {
+///         connections.first().map(|c| c.patient_id.clone())
+///     })
+/// );
+/// ```
 #[derive(Clone)]
 pub enum ConnectionIdentifier {
+    /// Identify patient by first name, last name, or full name
     ByName(String),
+    /// Identify patient using a custom function
     ByFunction(ConnectionFn),
 }
 
@@ -51,15 +88,54 @@ impl std::fmt::Debug for ConnectionIdentifier {
     }
 }
 
-/// Response from the read() method
-#[derive(Debug, Clone)]
+/// Response from the read() method containing current and historical glucose data
+///
+/// # Examples
+///
+/// ```no_run
+/// use libre_link_up_api_client::LibreLinkUpClient;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = LibreLinkUpClient::simple(
+///     "email@example.com".to_string(),
+///     "password".to_string(),
+///     None,
+/// )?;
+///
+/// let response = client.read().await?;
+/// println!("Current: {:.1} mg/dL", response.current.value);
+/// println!("History: {} readings", response.history.len());
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReadResponse {
     pub current: LibreCgmData,
     pub history: Vec<LibreCgmData>,
 }
 
-/// Response from the read_raw() method
-#[derive(Debug, Clone)]
+/// Response from the read_raw() method with unparsed API data
+///
+/// Access to raw API responses for advanced use cases
+///
+/// # Examples
+///
+/// ```no_run
+/// use libre_link_up_api_client::LibreLinkUpClient;
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = LibreLinkUpClient::simple(
+///     "email@example.com".to_string(),
+///     "password".to_string(),
+///     None,
+/// )?;
+///
+/// let raw = client.read_raw().await?;
+/// println!("Connection ID: {}", raw.connection.patient_id);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReadRawResponse {
     pub connection: Connection,
     pub active_sensors: Vec<ActiveSensor>,
@@ -67,6 +143,34 @@ pub struct ReadRawResponse {
 }
 
 /// Main LibreLinkUp API client
+///
+/// Handles authentication, token management, and API requests.
+///
+/// # Examples
+///
+/// ```no_run
+/// use libre_link_up_api_client::{LibreLinkUpClient, ClientConfig, Region};
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// // Simple creation
+/// let client = LibreLinkUpClient::simple(
+///     "email@example.com".to_string(),
+///     "password".to_string(),
+///     None,
+/// )?;
+///
+/// // With configuration
+/// let config = ClientConfig {
+///     username: "email@example.com".to_string(),
+///     password: "password".to_string(),
+///     api_version: None,
+///     region: Some(Region::EU),
+///     connection_identifier: None,
+/// };
+/// let client = LibreLinkUpClient::new(config)?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct LibreLinkUpClient {
     config: ClientConfig,
     client: Client,
@@ -77,7 +181,34 @@ pub struct LibreLinkUpClient {
 }
 
 impl LibreLinkUpClient {
-    /// Create a new LibreLinkUp client with configuration
+    /// Create a new LibreLinkUp client with full configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Client configuration including credentials, region, and API version
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::{LibreLinkUpClient, ClientConfig, Region};
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let config = ClientConfig {
+    ///     username: "email@example.com".to_string(),
+    ///     password: "password".to_string(),
+    ///     api_version: None,
+    ///     region: Some(Region::EU),
+    ///     connection_identifier: None,
+    /// };
+    ///
+    /// let client = LibreLinkUpClient::new(config)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(config: ClientConfig) -> Result<Self> {
         let version = config
             .api_version
@@ -117,6 +248,33 @@ impl LibreLinkUpClient {
     }
 
     /// Create a simple client with just username and password
+    ///
+    /// Convenience constructor using default settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - LibreLinkUp account email
+    /// * `password` - LibreLinkUp account password
+    /// * `region` - Optional region string (e.g., "us", "eu"). Auto-detects if None.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "email@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn simple(username: String, password: String, region: Option<String>) -> Result<Self> {
         let region_enum = region
             .as_deref()
@@ -133,7 +291,7 @@ impl LibreLinkUpClient {
     }
 
     /// Login to the LibreLinkUp service
-    pub async fn login(&self) -> Result<LoginResponse> {
+    async fn login(&self) -> Result<LoginResponse> {
         let base_url = self.base_url.read().await.clone();
         let url = format!("{}{}", base_url, LOGIN_ENDPOINT);
 
@@ -184,10 +342,10 @@ impl LibreLinkUpClient {
         }
 
         // Handle regional redirect
-        if let LoginResponseData::Redirect(redirect_data) = &login_response.data {
-            if redirect_data.redirect {
-                return self.handle_redirect(redirect_data.region.clone()).await;
-            }
+        if let LoginResponseData::Redirect(redirect_data) = &login_response.data
+            && redirect_data.redirect
+        {
+            return self.handle_redirect(redirect_data.region.clone()).await;
         }
 
         // Extract token and account ID
@@ -303,6 +461,36 @@ impl LibreLinkUpClient {
     }
 
     /// Read raw glucose data from the API
+    ///
+    /// Returns unparsed API responses with all available data including
+    /// connection info, active sensors, and glucose measurements.
+    ///
+    /// # Errors
+    ///
+    /// - [`LibreLinkUpError::NoConnections`] if no patients are being followed
+    /// - [`LibreLinkUpError::AuthFailed`] if authentication fails
+    /// - [`LibreLinkUpError::Http`] for network errors
+    /// - [`LibreLinkUpError::InvalidResponse`] if API response is malformed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "email@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    ///
+    /// let raw = client.read_raw().await?;
+    /// println!("Connection: {:?}", raw.connection);
+    /// println!("Active sensors: {}", raw.active_sensors.len());
+    /// println!("Graph data points: {}", raw.graph_data.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn read_raw(&self) -> Result<ReadRawResponse> {
         let connection_id = if let Some(id) = self.connection_id.read().await.clone() {
             id
@@ -338,6 +526,36 @@ impl LibreLinkUpClient {
     }
 
     /// Read current and historical glucose data
+    ///
+    /// Returns processed glucose data with current reading and historical measurements.
+    /// Automatically handles authentication and connection management.
+    ///
+    /// # Errors
+    ///
+    /// - [`LibreLinkUpError::NoConnections`] if no patients are being followed
+    /// - [`LibreLinkUpError::AuthFailed`] if authentication fails
+    /// - [`LibreLinkUpError::Http`] for network errors
+    /// - [`LibreLinkUpError::InvalidResponse`] if API response is malformed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "email@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    ///
+    /// let data = client.read().await?;
+    /// println!("Current glucose: {:.1} mg/dL", data.current.value);
+    /// println!("Trend: {:?}", data.current.trend);
+    /// println!("Historical readings: {}", data.history.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn read(&self) -> Result<ReadResponse> {
         let raw = self.read_raw().await?;
 
@@ -349,8 +567,50 @@ impl LibreLinkUpClient {
 
     /// Read averaged glucose data over time
     ///
-    /// This method polls the API at regular intervals and calculates averages
-    /// when the specified amount of readings have been collected.
+    /// Polls the API at regular intervals and calculates averages when the specified
+    /// number of readings have been collected. The callback is invoked with the
+    /// current reading, recent readings used for averaging, and full history.
+    ///
+    /// # Arguments
+    ///
+    /// * `amount` - Number of readings to collect before averaging
+    /// * `callback` - Function called with (current, averaged_history, full_history)
+    /// * `interval_ms` - Polling interval in milliseconds
+    ///
+    /// # Returns
+    ///
+    /// Returns a `JoinHandle` for the background polling task. Call `.abort()` on it to stop.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client cannot be cloned for background operation.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "email@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    ///
+    /// let handle = client.read_averaged(
+    ///     10,  // Average 10 readings
+    ///     |current, averaged, history| {
+    ///         println!("Current: {:.1} mg/dL", current.value);
+    ///         let avg = averaged.iter().map(|d| d.value).sum::<f64>() / averaged.len() as f64;
+    ///         println!("Average: {:.1} mg/dL", avg);
+    ///     },
+    ///     60000,  // Poll every 60 seconds
+    /// ).await?;
+    ///
+    /// // Later: handle.abort() to stop polling
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn read_averaged<F>(
         &self,
         amount: usize,

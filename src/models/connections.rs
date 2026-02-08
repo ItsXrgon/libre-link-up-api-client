@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Response from the connections list endpoint
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConnectionsResponse {
     pub status: i32,
     pub data: Vec<Datum>,
@@ -9,7 +9,7 @@ pub struct ConnectionsResponse {
 }
 
 /// Individual connection (patient) in the list
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Datum {
     pub id: String,
     #[serde(rename = "patientId")]
@@ -39,7 +39,7 @@ pub struct Datum {
     pub created: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlarmRules {
     pub c: Option<bool>,
     pub h: H,
@@ -51,7 +51,7 @@ pub struct AlarmRules {
     pub std: Std,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct F {
     pub th: f64,
     pub thmm: f64,
@@ -61,7 +61,7 @@ pub struct F {
     pub on: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct H {
     pub on: bool,
     pub th: f64,
@@ -70,17 +70,17 @@ pub struct H {
     pub f: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Nd {
     pub i: i32,
     pub r: i32,
     pub l: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Std {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Glucose {
     #[serde(rename = "FactoryTimestamp")]
     pub factory_timestamp: String,
@@ -106,7 +106,7 @@ pub struct Glucose {
     pub is_low: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatientDevice {
     pub did: String,
     pub dtid: i32,
@@ -119,13 +119,13 @@ pub struct PatientDevice {
     pub alarms: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FixedLowAlarmValues {
     pub mgdl: f64,
     pub mmoll: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sensor {
     #[serde(rename = "deviceId")]
     pub device_id: String,
@@ -135,7 +135,7 @@ pub struct Sensor {
     pub pt: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ticket {
     pub token: String,
     pub expires: i64,

@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 /// Response from the connection endpoint
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConnectionResponse {
     pub status: i32,
     pub data: Data,
     pub ticket: Ticket,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Data {
     pub connection: Connection,
     #[serde(rename = "activeSensors")]
@@ -17,13 +17,13 @@ pub struct Data {
     pub graph_data: Vec<GlucoseItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActiveSensor {
     pub sensor: Sensor,
     pub device: Device,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Device {
     pub did: String,
     pub dtid: i32,
@@ -36,13 +36,13 @@ pub struct Device {
     pub alarms: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FixedLowAlarmValues {
     pub mgdl: f64,
     pub mmoll: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sensor {
     #[serde(rename = "deviceId")]
     pub device_id: String,
@@ -52,7 +52,7 @@ pub struct Sensor {
     pub pt: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Connection {
     pub id: String,
     #[serde(rename = "patientId")]
@@ -82,7 +82,7 @@ pub struct Connection {
     pub created: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AlarmRules {
     pub c: Option<bool>,
     pub h: H,
@@ -94,7 +94,7 @@ pub struct AlarmRules {
     pub std: Std,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct F {
     pub th: f64,
     pub thmm: f64,
@@ -104,7 +104,7 @@ pub struct F {
     pub on: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct H {
     pub on: bool,
     pub th: f64,
@@ -113,17 +113,17 @@ pub struct H {
     pub f: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Nd {
     pub i: i32,
     pub r: i32,
     pub l: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Std {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlucoseItem {
     #[serde(rename = "FactoryTimestamp")]
     pub factory_timestamp: String,
@@ -149,7 +149,7 @@ pub struct GlucoseItem {
     pub is_low: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
     pub token: String,
     pub expires: i64,

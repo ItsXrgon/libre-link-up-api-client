@@ -13,7 +13,23 @@ pub enum TrendType {
 }
 
 /// Processed glucose data for consumption
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// # Examples
+///
+/// ```
+/// use libre_link_up_api_client::{LibreCgmData, TrendType};
+/// use chrono::Utc;
+///
+/// let data = LibreCgmData {
+///     value: 120.0,
+///     is_high: false,
+///     is_low: false,
+///     trend: TrendType::Flat,
+///     date: Utc::now(),
+/// };
+/// assert_eq!(data.value, 120.0);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LibreCgmData {
     /// Glucose value in mg/dL
     pub value: f64,

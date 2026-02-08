@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Login credentials
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoginArgs {
     #[serde(rename = "email")]
     pub username: String,
@@ -9,27 +9,27 @@ pub struct LoginArgs {
 }
 
 /// Login redirect response when regional redirect is needed
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoginRedirectResponse {
     pub status: i32,
     pub data: LoginRedirectData,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoginRedirectData {
     pub redirect: bool,
     pub region: String,
 }
 
 /// Main login response
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoginResponse {
     pub status: i32,
     pub data: LoginResponseData,
 }
 
 /// Login response data - can be either complete user data or step data for MFA
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum LoginResponseData {
     Complete(Box<Data>),
@@ -39,14 +39,14 @@ pub enum LoginResponseData {
 }
 
 /// Locked account data for rate limiting
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LockedData {
     pub code: i32,
     pub data: LockoutInfo,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LockoutInfo {
     pub failures: i32,
     pub interval: i32,
@@ -54,7 +54,7 @@ pub struct LockoutInfo {
 }
 
 /// Step data for additional authentication requirements (MFA, email verification, etc.)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepData {
     pub step: Step,
     pub user: StepUser,
@@ -62,7 +62,7 @@ pub struct StepData {
     pub auth_ticket: AuthTicket,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Step {
     #[serde(rename = "type")]
     pub step_type: String,
@@ -71,12 +71,12 @@ pub struct Step {
     pub props: StepProps,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepProps {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepUser {
     pub id: String,
     #[serde(rename = "accountType")]
@@ -87,7 +87,7 @@ pub struct StepUser {
 }
 
 /// Complete login data with full user information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Data {
     pub user: User,
     pub messages: DataMessages,
@@ -100,7 +100,7 @@ pub struct Data {
     pub trusted_device_token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuthTicket {
     pub token: String,
     #[serde(default)]
@@ -109,20 +109,20 @@ pub struct AuthTicket {
     pub duration: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct DataMessages {
     pub unread: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Notifications {
     pub unresolved: i32,
 }
 
 /// User profile information
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct User {
     pub id: String,
@@ -167,7 +167,7 @@ pub struct User {
     pub consents: Consents,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct TwoFactor {
     #[serde(rename = "primaryMethod")]
@@ -180,13 +180,13 @@ pub struct TwoFactor {
     pub secondary_value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Consents {
     #[serde(default)]
     pub llu: Llu,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Llu {
     #[serde(rename = "policyAccept")]
@@ -196,16 +196,16 @@ pub struct Llu {
 }
 
 /// Empty details object
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Details {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct System {
     pub messages: SystemMessages,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SystemMessages {
     #[serde(rename = "firstUsePhoenix")]

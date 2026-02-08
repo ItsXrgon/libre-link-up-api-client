@@ -7,7 +7,7 @@ This is a Rust implementation inspired by the [TypeScript libre-link-up-api-clie
 ## Features
 
 - ✅ Automatic authentication and token management
-- ✅ Regional endpoint handling (US, EU, JP, DE, FR, AP, AU, AE)
+- ✅ Regional endpoint handling (US, EU, EU2,JP, DE, FR, AP, AU, AE)
 - ✅ Read current and historical glucose data
 - ✅ Raw API response access
 - ✅ Averaged glucose readings over time
