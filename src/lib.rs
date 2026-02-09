@@ -113,4 +113,6 @@ pub mod utils;
 
 pub use client::{ClientConfig, ConnectionIdentifier, LibreLinkUpClient};
 pub use errors::{LibreLinkUpError, Result};
-pub use models::{LibreCgmData, ReadRawResponse, ReadResponse, Region, TrendType};
+pub use models::{
+    Connection, GlucoseItem, LibreCgmData, ReadRawResponse, ReadResponse, Region, TrendType,
+};
