@@ -1,6 +1,4 @@
 //! Error types for LibreLinkUp API operations
-//!
-//! All errors implement `std::error::Error` and can be converted to/from various error types.
 
 use thiserror::Error;
 
