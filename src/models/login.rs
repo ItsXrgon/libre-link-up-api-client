@@ -105,7 +105,8 @@ pub struct StepUser {
     pub ui_language: String,
 }
 
-/// Complete login data with full user information
+/// Complete login data with full user information.
+/// Also used as the response body for GET /user.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Data {
     pub user: User,
@@ -117,6 +118,27 @@ pub struct Data {
     pub invitations: Option<Vec<String>>,
     #[serde(default, rename = "trustedDeviceToken")]
     pub trusted_device_token: String,
+}
+
+/// Response from GET /user (authenticated).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserResponse {
+    pub status: i32,
+    pub data: Data,
+}
+
+/// Data payload for GET /account (user only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccountData {
+    pub user: User,
+}
+
+/// Response from GET /account (authenticated).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccountResponse {
+    pub status: i32,
+    pub data: AccountData,
+    pub ticket: crate::models::common::AuthTicket,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

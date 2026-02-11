@@ -4,8 +4,11 @@ use crate::{
         client::{LibreCgmData, ReadRawResponse, ReadResponse},
         common::Connection,
         connections::ConnectionsResponse,
+        countries::CountryConfigResponse,
         graph::GraphResponse,
-        login::{LoginArgs, LoginResponse, LoginResponseData},
+        logbook::LogbookResponse,
+        login::{AccountResponse, LoginArgs, LoginResponse, LoginResponseData, UserResponse},
+        notifications::NotificationSettingsResponse,
         region::Region,
     },
     utils::{TREND_MAP, map_glucose_data},
@@ -19,6 +22,10 @@ use tokio::sync::RwLock;
 /// API Region configuration
 const LOGIN_ENDPOINT: &str = "/llu/auth/login";
 const CONNECTIONS_ENDPOINT: &str = "/llu/connections";
+const COUNTRY_CONFIG_ENDPOINT: &str = "/llu/config/country";
+const USER_ENDPOINT: &str = "/user";
+const ACCOUNT_ENDPOINT: &str = "/account";
+const NOTIFICATIONS_SETTINGS_ENDPOINT: &str = "/llu/notifications/settings";
 
 /// Type alias for connection identifier function
 type ConnectionFn = Arc<dyn Fn(&[Connection]) -> Option<String> + Send + Sync>;
@@ -90,7 +97,14 @@ impl std::fmt::Debug for ConnectionIdentifier {
 
 /// Main LibreLinkUp API client
 ///
-/// Handles authentication, token management, and API requests.
+/// Handles authentication, token management, and API requests. The same client supports both
+/// **authenticated** and **unauthenticated** calls:
+///
+/// - **Authenticated** (require login; token and account-id are sent): [`read`](Self::read),
+///   [`read_raw`](Self::read_raw), [`get_user`](Self::get_user), [`get_account`](Self::get_account),
+///   [`get_logbook`](Self::get_logbook), [`get_notification_settings`](Self::get_notification_settings).
+///   These use automatic login and token refresh.
+/// - **Unauthenticated** (no credentials sent): [`get_country_config`](Self::get_country_config).
 ///
 /// # Examples
 ///
@@ -186,7 +200,7 @@ impl LibreLinkUpClient {
             header::CONTENT_TYPE,
             "application/json;charset=UTF-8".parse().unwrap(),
         );
-        headers.insert("product", "llu.ios".parse().unwrap());
+        headers.insert("product", "llu.android".parse().unwrap());
         headers.insert("version", version.parse().unwrap());
         headers.insert("accept-language", "en-US".parse().unwrap());
 
@@ -398,9 +412,196 @@ impl LibreLinkUpClient {
         })
     }
 
+    /// Make an unauthenticated GET request (no Bearer token or account-id).
+    /// Use for endpoints that do not require login (e.g. country config).
+    async fn unauthenticated_get<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        path_label: &str,
+    ) -> Result<T> {
+        let response = self.client.get(url).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read response".to_string());
+            return Err(LibreLinkUpError::InvalidResponse(format!(
+                "request to '{}' failed - HTTP {}: {}",
+                path_label, status, body
+            )));
+        }
+        let body: String = response.text().await?;
+        serde_json::from_str(&body).map_err(|e| {
+            LibreLinkUpError::InvalidResponse(format!(
+                "failed to parse JSON for '{}': {}",
+                path_label, e
+            ))
+        })
+    }
+
     /// Get list of connections
     async fn get_connections(&self) -> Result<ConnectionsResponse> {
         self.authenticated_request(CONNECTIONS_ENDPOINT).await
+    }
+
+    /// Get current user profile (authenticated).
+    ///
+    /// Returns user info, messages, notifications, and auth ticket.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LibreLinkUpError::Http`] or [`LibreLinkUpError::InvalidResponse`] on failure.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "user@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    /// let user = client.get_user().await?;
+    /// println!("{} {}", user.data.user.first_name, user.data.user.last_name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_user(&self) -> Result<UserResponse> {
+        self.authenticated_request(USER_ENDPOINT).await
+    }
+
+    /// Get account info (authenticated).
+    ///
+    /// Returns user profile and current auth ticket.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "user@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    /// let account = client.get_account().await?;
+    /// println!("{} {}", account.data.user.first_name, account.data.user.last_name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_account(&self) -> Result<AccountResponse> {
+        self.authenticated_request(ACCOUNT_ENDPOINT).await
+    }
+
+    /// Get logbook (glucose events/alarms) for a patient (authenticated).
+    ///
+    /// # Arguments
+    ///
+    /// * `patient_id` - Patient/connection ID (same as used for [`read`](Self::read) / [`read_raw`](Self::read_raw)).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "user@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    /// let logbook = client.get_logbook("patient-id").await?;
+    /// for entry in &logbook.data {
+    ///     println!("{} {}", entry.timestamp, entry.value);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_logbook(&self, patient_id: &str) -> Result<LogbookResponse> {
+        let path = format!("{}/{}/logbook", CONNECTIONS_ENDPOINT, patient_id);
+        self.authenticated_request(&path).await
+    }
+
+    /// Get notification settings for a connection (authenticated).
+    ///
+    /// # Arguments
+    ///
+    /// * `connection_id` - Connection/patient ID (same as used for [`read`](Self::read) / [`read_raw`](Self::read_raw)).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "user@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    /// let settings = client.get_notification_settings("connection-id").await?;
+    /// println!("Alarms enabled: {}", settings.data.alarm_rules.c);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_notification_settings(
+        &self,
+        connection_id: &str,
+    ) -> Result<NotificationSettingsResponse> {
+        let path = format!("{}/{}", NOTIFICATIONS_SETTINGS_ENDPOINT, connection_id);
+        self.authenticated_request(&path).await
+    }
+
+    /// Fetch country/region config (unauthenticated).
+    ///
+    /// Uses the global API endpoint. Does not require login.
+    ///
+    /// # Arguments
+    ///
+    /// * `country` - Country code (e.g. `"us"`, `"eu"`).
+    /// * `version` - API version (e.g. `"4.16.0"`). If `None`, uses the client's configured version.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LibreLinkUpError::Http`] or [`LibreLinkUpError::InvalidResponse`] on failure.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use libre_link_up_api_client::LibreLinkUpClient;
+    ///
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = LibreLinkUpClient::simple(
+    ///     "user@example.com".to_string(),
+    ///     "password".to_string(),
+    ///     None,
+    /// )?;
+    /// let config = client.get_country_config("us", None).await?;
+    /// println!("Min version: {:?}", config.data.min_version);
+    /// println!("Regional map: {:?}", config.data.regional_map);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_country_config(
+        &self,
+        country: &str,
+        version: Option<&str>,
+    ) -> Result<CountryConfigResponse> {
+        let version =
+            version.unwrap_or_else(|| self.config.api_version.as_deref().unwrap_or("4.16.0"));
+        let url = format!(
+            "{}{}?country={}&version={}",
+            Region::Global.base_url(),
+            COUNTRY_CONFIG_ENDPOINT,
+            country,
+            version,
+        );
+        self.unauthenticated_get(&url, COUNTRY_CONFIG_ENDPOINT)
+            .await
     }
 
     /// Get connection ID by identifier
