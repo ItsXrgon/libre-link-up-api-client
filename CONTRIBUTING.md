@@ -37,8 +37,8 @@ This project follows the Rust Code of Conduct. Please be respectful and professi
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOURNAME/libre_link_up_api_client
-cd libre_link_up_api_client
+git clone https://github.com/YOURNAME/libre-link-up-api-client
+cd libre-link-up-api-client
 
 # Build the project
 cargo build

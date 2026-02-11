@@ -1,4 +1,4 @@
-# libre_link_up_api_client
+# libre-link-up-api-client
 
 Unofficial Rust client for the LibreLinkUp API. Fetches CGM data from FreeStyle Libre 2/3 devices via Abbott's sharing service.
 
