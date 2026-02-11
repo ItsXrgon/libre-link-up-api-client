@@ -17,7 +17,7 @@ This is a Rust implementation inspired by [TypeScript libre-link-up-api-client](
 
 ## Documentation
 
-- **API Authentication**: Authentication details are documented in the [LibreView Unofficial API Documentation](https://libreview-unofficial.stoplight.io/docs/libreview-unofficial/8i2x0tc4qumh2-authentication) (external resource).
+- **Libre APIs**: Libre APIs are documented in the [LibreView Unofficial API Documentation](https://libreview-unofficial.stoplight.io/docs/libreview-unofficial/8i2x0tc4qumh2-authentication) (external resource).
 
 ## Installation
 
