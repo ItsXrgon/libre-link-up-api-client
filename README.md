@@ -20,8 +20,8 @@ use libre_link_up_api_client::LibreLinkUpClient;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = LibreLinkUpClient::simple(
-        "your_email@example.com".to_string(),
-        "your_password".to_string(),
+        "your_email@example.com",
+        "your_password",
         None,
     )?;
 

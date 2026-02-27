@@ -31,7 +31,7 @@ const USER_ENDPOINT: &str = "/user";
 const ACCOUNT_ENDPOINT: &str = "/account";
 const NOTIFICATIONS_SETTINGS_ENDPOINT: &str = "/llu/notifications/settings";
 
-/// Type alias for connection identifier function
+/// Type alias for the connection identifier function
 type ConnectionFn = Arc<dyn Fn(&[Connection]) -> Option<String> + Send + Sync>;
 
 /// Client configuration options
@@ -41,13 +41,8 @@ type ConnectionFn = Arc<dyn Fn(&[Connection]) -> Option<String> + Send + Sync>;
 /// ```
 /// use libre_link_up_api_client::{ClientConfig, Region};
 ///
-/// let config = ClientConfig {
-///     username: "email@example.com".to_string(),
-///     password: "password".to_string(),
-///     api_version: None,  // Uses default "4.16.0"
-///     region: Some(Region::US),
-///     connection_identifier: None,
-/// };
+/// let config = ClientConfig::new("email@example.com", "password")
+///     .with_region(Region::US);
 /// ```
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
@@ -61,6 +56,40 @@ pub struct ClientConfig {
     pub region: Option<Region>,
     /// Optional connection identifier for multi-patient accounts
     pub connection_identifier: Option<ConnectionIdentifier>,
+}
+
+impl ClientConfig {
+    /// Create a new configuration with required credentials
+    pub fn new(username: impl Into<String>, password: impl Into<String>) -> Self {
+        Self {
+            username: username.into(),
+            password: password.into(),
+            api_version: None,
+            region: None,
+            connection_identifier: None,
+        }
+    }
+
+    /// Set the API version
+    #[must_use]
+    pub fn with_api_version(mut self, version: impl Into<String>) -> Self {
+        self.api_version = Some(version.into());
+        self
+    }
+
+    /// Set the API region
+    #[must_use]
+    pub fn with_region(mut self, region: Region) -> Self {
+        self.region = Some(region);
+        self
+    }
+
+    /// Set the connection identifier
+    #[must_use]
+    pub fn with_connection_identifier(mut self, identifier: ConnectionIdentifier) -> Self {
+        self.connection_identifier = Some(identifier);
+        self
+    }
 }
 
 /// Connection identifier for multi-patient accounts
@@ -161,13 +190,8 @@ impl LibreLinkUpClient {
     /// use libre_link_up_api_client::{LibreLinkUpClient, ClientConfig, Region};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let config = ClientConfig {
-    ///     username: "email@example.com".to_string(),
-    ///     password: "password".to_string(),
-    ///     api_version: None,
-    ///     region: Some(Region::EU),
-    ///     connection_identifier: None,
-    /// };
+    /// let config = ClientConfig::new("email@example.com", "password")
+    ///     .with_region(Region::EU);
     ///
     /// let client = LibreLinkUpClient::new(config)?;
     /// # Ok(())
@@ -244,14 +268,21 @@ impl LibreLinkUpClient {
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = LibreLinkUpClient::simple(
-    ///     "email@example.com".to_string(),
-    ///     "password".to_string(),
+    ///     "email@example.com",
+    ///     "password",
     ///     None,
     /// )?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn simple(username: String, password: String, region: Option<String>) -> Result<Self> {
+    pub fn simple(
+        username: impl Into<String>,
+        password: impl Into<String>,
+        region: Option<String>,
+    ) -> Result<Self> {
+        let username = username.into();
+        let password = password.into();
+
         if username.trim().is_empty() {
             return Err(LibreLinkUpError::AuthFailed(
                 "username must not be empty".to_string(),
@@ -264,7 +295,7 @@ impl LibreLinkUpClient {
         }
 
         let region_enum = region
-            .as_deref()
+            .as_ref()
             .and_then(|s| Region::from_str(s).ok())
             .or(Some(Region::default()));
 
@@ -595,8 +626,7 @@ impl LibreLinkUpClient {
         country: &str,
         version: Option<&str>,
     ) -> Result<CountryConfigResponse> {
-        let version =
-            version.unwrap_or_else(|| self.config.api_version.as_deref().unwrap_or("4.16.0"));
+        let version = version.unwrap_or_else(|| self.config.api_version.as_deref().unwrap_or("4.16.0"));
         let url = format!(
             "{}{}?country={}&version={}",
             Region::Global.base_url(),

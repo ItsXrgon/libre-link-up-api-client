@@ -5,12 +5,12 @@
 //!
 //! ## Main API
 //!
-//! - **[`LibreLinkUpClient`]** — main client; use [`simple`](client::LibreLinkUpClient::simple) or [`new`](client::LibreLinkUpClient::new) to construct.
-//! - **[`LibreLinkUpClient::get_country_config`](client::LibreLinkUpClient::get_country_config)** — unauthenticated country/region config.
+//! - **[`LibreLinkUpClient`]** — main client; use [`simple`](LibreLinkUpClient::simple) or [`new`](LibreLinkUpClient::new) to construct.
+//! - **[`LibreLinkUpClient::get_country_config`](LibreLinkUpClient::get_country_config)** — unauthenticated country/region config.
 //! - **[`ClientConfig`]** — client configuration (username, password, region, etc.).
 //! - **[`ConnectionIdentifier`]** — how to pick a patient when following multiple (e.g. by name).
 //! - **[`LibreLinkUpError`]** — error type for all operations.
-//! - **[`Result<T>`](errors::Result)** — alias for `Result<T, LibreLinkUpError>`.
+//! - **[`Result<T>`](Result)** — alias for `Result<T, LibreLinkUpError>`.
 //!
 //! ## Response and model types
 //!
@@ -87,7 +87,7 @@
 //!
 //! ## Error Handling
 //!
-//! All API operations return [`Result<T, LibreLinkUpError>`](errors::LibreLinkUpError).
+//! All API operations return [`Result<T, LibreLinkUpError>`](LibreLinkUpError).
 //!
 //! ```no_run
 //! use libre_link_up_api_client::{LibreLinkUpClient, LibreLinkUpError};

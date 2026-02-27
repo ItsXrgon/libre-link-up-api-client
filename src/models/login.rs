@@ -140,7 +140,7 @@ pub struct AccountData {
 pub struct AccountResponse {
     pub status: i32,
     pub data: AccountData,
-    pub ticket: crate::models::common::AuthTicket,
+    pub ticket: AuthTicket,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

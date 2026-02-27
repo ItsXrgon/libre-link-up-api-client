@@ -86,3 +86,62 @@ pub fn map_glucose_data<T: GlucoseData>(item: &T) -> LibreCgmData {
         date,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::common::GlucoseItem;
+
+    #[test]
+    fn test_get_trend() {
+        assert_eq!(get_trend(Some(3)), TrendType::Flat);
+        assert_eq!(get_trend(Some(5)), TrendType::SingleUp);
+        assert_eq!(get_trend(Some(0)), TrendType::NotComputable);
+        assert_eq!(get_trend(None), TrendType::Flat);
+        assert_eq!(get_trend(Some(10)), TrendType::Flat);
+    }
+
+    #[test]
+    fn test_map_glucose_data() {
+        let item = GlucoseItem {
+            factory_timestamp: "10/24/2024 10:00:00 AM".to_string(),
+            timestamp: "10/24/2024 10:00:00 AM".to_string(),
+            item_type: 0,
+            value_in_mg_per_dl: 100.0,
+            trend_arrow: Some(3),
+            trend_message: None,
+            measurement_color: 1,
+            glucose_units: 0,
+            value: 100.0,
+            is_high: false,
+            is_low: false,
+        };
+
+        let result = map_glucose_data(&item);
+        assert_eq!(result.value, 100.0);
+        assert_eq!(result.trend, TrendType::Flat);
+        assert!(!result.is_high);
+        assert!(!result.is_low);
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use super::super::models::Region;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_region_parsing() {
+        assert_eq!(Region::from_str("US").unwrap(), Region::US);
+        assert_eq!(Region::from_str("eu").unwrap(), Region::EU);
+        assert_eq!(Region::from_str("EU2").unwrap(), Region::EU2);
+        assert_eq!(Region::from_str("invalid").unwrap(), Region::Global);
+    }
+
+    #[test]
+    fn test_region_urls() {
+        assert!(Region::US.base_url().contains("api-us"));
+        assert!(Region::EU.base_url().contains("api-eu"));
+        assert!(Region::Global.base_url().contains("api.libreview"));
+    }
+}

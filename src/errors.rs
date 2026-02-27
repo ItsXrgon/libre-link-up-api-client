@@ -46,10 +46,10 @@ pub enum LibreLinkUpError {
     #[error("Unable to find region '{0}'. Available regions: {1}")]
     RegionNotFound(String, String),
 
-    #[error("Unable to identify connection by given name '{0}'")]
+    #[error("Unable to identify connection by name '{0}'")]
     ConnectionNotFound(String),
 
-    #[error("Unable to identify connection by given function")]
+    #[error("Unable to identify connection by the provided function")]
     ConnectionFunctionFailed,
 
     #[error("Your account does not follow any patients. Please start following and try again.")]
