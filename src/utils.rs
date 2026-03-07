@@ -7,7 +7,7 @@ use crate::models::{
     client::TrendType,
     common::{GlucoseItem, GlucoseMeasurement},
 };
-use chrono::Utc;
+use chrono::{DateTime, NaiveDateTime, Utc};
 
 /// Maps API trend arrow index (0–6) to [`TrendType`]. Used when converting raw readings.
 pub const TREND_MAP: [TrendType; 7] = [
@@ -74,8 +74,13 @@ impl GlucoseData for GlucoseMeasurement {
 
 /// Converts a [`GlucoseData`] item (e.g. [`GlucoseItem`], [`GlucoseMeasurement`]) into [`LibreCgmData`]. Uses [`get_trend`] for the trend; parses timestamp or falls back to now.
 pub fn map_glucose_data<T: GlucoseData>(item: &T) -> LibreCgmData {
-    let date = format!("{} UTC", item.factory_timestamp())
-        .parse()
+    let parsed = NaiveDateTime::parse_from_str(
+        item.factory_timestamp(),
+        "%m/%d/%Y %I:%M:%S %p",
+    );
+
+    let timestamp = parsed
+        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
         .unwrap_or_else(|_| Utc::now());
 
     LibreCgmData {
@@ -83,7 +88,7 @@ pub fn map_glucose_data<T: GlucoseData>(item: &T) -> LibreCgmData {
         is_high: item.is_high(),
         is_low: item.is_low(),
         trend: get_trend(item.trend_arrow()),
-        date,
+        timestamp,
     }
 }
 

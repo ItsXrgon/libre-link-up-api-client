@@ -314,8 +314,8 @@ impl LibreLinkUpClient {
         let url = format!("{}{}", base_url, LOGIN_ENDPOINT);
 
         let login_args = LoginArgs {
-            username: self.config.username.clone(),
-            password: self.config.password.clone(),
+            username: "alikoheil2004@gmail.com".to_string(),
+            password: "l$KNU00s75WEX%".to_string(),
         };
 
         let response = self.client.post(&url).json(&login_args).send().await?;
@@ -754,7 +754,6 @@ impl LibreLinkUpClient {
     /// ```
     pub async fn read(&self) -> Result<ReadResponse> {
         let raw = self.read_raw().await?;
-
         Ok(ReadResponse {
             current: map_glucose_data(&raw.connection.glucose_measurement),
             history: raw.graph_data.iter().map(map_glucose_data).collect(),
@@ -831,7 +830,7 @@ impl LibreLinkUpClient {
                     let history = read_response.history;
 
                     // Check if we already have this reading
-                    if !memory.iter().any(|m| m.date == current.date) {
+                    if !memory.iter().any(|m| m.timestamp == current.timestamp) {
                         memory.push(current.clone());
                     }
 
@@ -863,7 +862,7 @@ impl LibreLinkUpClient {
                             is_high: current.is_high,
                             is_low: current.is_low,
                             trend: avg_trend,
-                            date: current.date,
+                            timestamp: current.timestamp,
                         };
 
                         // Move the collected readings into the callback without cloning
