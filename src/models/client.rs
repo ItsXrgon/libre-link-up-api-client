@@ -34,7 +34,7 @@ pub enum TrendType {
 ///     is_high: false,
 ///     is_low: false,
 ///     trend: TrendType::Flat,
-///     date: Utc::now(),
+///     timestamp: Utc::now(),
 /// };
 /// assert_eq!(data.value, 120.0);
 /// ```
@@ -51,7 +51,7 @@ pub struct LibreCgmData {
     /// Trend direction
     pub trend: TrendType,
     /// Timestamp of the reading
-    pub date: DateTime<Utc>,
+    pub timestamp: DateTime<Utc>,
 }
 
 /// Response from the read() method containing current and historical glucose data

@@ -43,6 +43,7 @@ mod integration {
         let client = LibreLinkUpClient::simple(email, password, None).unwrap();
         let result = client.read().await;
 
+        println!("Read response: {:?}", result);
         match result {
             Ok(data) => {
                 assert!(data.current.value > 0.0);
