@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "  {}. {:.1} mg/dL at {}",
                         i + 1,
                         reading.value,
-                        reading.date
+                        reading.timestamp
                     );
                 }
             },

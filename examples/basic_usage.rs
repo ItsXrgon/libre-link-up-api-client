@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Trend: {:?}", data.current.trend);
     println!("Is high: {}", data.current.is_high);
     println!("Is low: {}", data.current.is_low);
-    println!("Date: {}", data.current.date);
+    println!("Date: {}", data.current.timestamp);
 
     println!("\nHistorical readings: {} entries", data.history.len());
 
