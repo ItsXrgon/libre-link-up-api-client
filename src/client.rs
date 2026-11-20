@@ -5,7 +5,7 @@
 use crate::{
     errors::{LibreLinkUpError, Result},
     models::{
-        client::{LibreCgmData, ReadRawResponse, ReadResponse},
+        client::{LibreCgmData, ReadRawResponse, ReadResponse, TrendType},
         common::Connection,
         connections::ConnectionsResponse,
         countries::CountryConfigResponse,
@@ -15,15 +15,18 @@ use crate::{
         notifications::NotificationSettingsResponse,
         region::Region,
     },
-    utils::{TREND_MAP, map_glucose_data},
+    utils::TREND_MAP,
 };
 use reqwest::{Client, header};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 
-/// API Region configuration
+/// LibreLinkUp app version sent in the `version` header unless [`ClientConfig::api_version`] is set.
+pub const DEFAULT_API_VERSION: &str = "4.16.0";
+
+// API endpoint paths, relative to the region's base URL.
 const LOGIN_ENDPOINT: &str = "/llu/auth/login";
 const CONNECTIONS_ENDPOINT: &str = "/llu/connections";
 const COUNTRY_CONFIG_ENDPOINT: &str = "/llu/config/country";
@@ -31,10 +34,11 @@ const USER_ENDPOINT: &str = "/user";
 const ACCOUNT_ENDPOINT: &str = "/account";
 const NOTIFICATIONS_SETTINGS_ENDPOINT: &str = "/llu/notifications/settings";
 
-/// Type alias for the connection identifier function
+/// Selector for [`ConnectionIdentifier::ByFunction`]: given the followed patients, returns the
+/// `patient_id` of the one to read, or `None` if none fits.
 type ConnectionFn = Arc<dyn Fn(&[Connection]) -> Option<String> + Send + Sync>;
 
-/// Client configuration options
+/// Client configuration. Build it with [`ClientConfig::new`] and the `with_*` methods.
 ///
 /// # Examples
 ///
@@ -46,15 +50,16 @@ type ConnectionFn = Arc<dyn Fn(&[Connection]) -> Option<String> + Send + Sync>;
 /// ```
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    /// Username for LibreLinkUp account
+    /// LibreLinkUp (follower) account email.
     pub username: String,
-    /// Password for LibreLinkUp account
+    /// LibreLinkUp (follower) account password.
     pub password: String,
-    /// API version (defaults to "4.16.0")
+    /// LibreLinkUp app version to present to the API. `None` uses [`DEFAULT_API_VERSION`].
+    /// Raise it if the API starts rejecting requests as coming from an outdated app.
     pub api_version: Option<String>,
-    /// API region (defaults to Global which auto-redirects)
+    /// API region. `None` uses [`Region::Global`], which redirects to the account's region at login.
     pub region: Option<Region>,
-    /// Optional connection identifier for multi-patient accounts
+    /// Which followed patient to read. `None` reads the first one the API returns.
     pub connection_identifier: Option<ConnectionIdentifier>,
 }
 
@@ -92,9 +97,9 @@ impl ClientConfig {
     }
 }
 
-/// Connection identifier for multi-patient accounts
+/// Which followed patient to read, for accounts that follow more than one.
 ///
-/// Choose a specific patient's data when following multiple people.
+/// The choice is made on the first read and kept for the client's lifetime.
 ///
 /// # Examples
 ///
@@ -113,9 +118,10 @@ impl ClientConfig {
 /// ```
 #[derive(Clone)]
 pub enum ConnectionIdentifier {
-    /// Identify patient by first name, last name, or full name
+    /// Match the patient's full name, `"<first name> <last name>"`, ignoring case.
     ByName(String),
-    /// Identify patient using a custom function
+    /// Pick the patient with a function that receives every followed patient and returns
+    /// the chosen one's `patient_id`, or `None` if none fits.
     ByFunction(ConnectionFn),
 }
 
@@ -174,15 +180,14 @@ pub struct LibreLinkUpClient {
 }
 
 impl LibreLinkUpClient {
-    /// Create a new LibreLinkUp client with full configuration
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Client configuration including credentials, region, and API version
+    /// Create a client from a full [`ClientConfig`]. No request is made until the first call;
+    /// login happens then.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be built.
+    /// - [`LibreLinkUpError::InvalidConfig`] if the username or password is empty, or
+    ///   `api_version` is not a valid HTTP header value
+    /// - [`LibreLinkUpError::Http`] if the HTTP client cannot be built
     ///
     /// # Examples
     ///
@@ -200,20 +205,20 @@ impl LibreLinkUpClient {
     pub fn new(config: ClientConfig) -> Result<Self> {
         // Basic validation to avoid confusing HTTP-level errors later
         if config.username.trim().is_empty() {
-            return Err(LibreLinkUpError::AuthFailed(
+            return Err(LibreLinkUpError::InvalidConfig(
                 "username must not be empty".to_string(),
             ));
         }
         if config.password.is_empty() {
-            return Err(LibreLinkUpError::AuthFailed(
+            return Err(LibreLinkUpError::InvalidConfig(
                 "password must not be empty".to_string(),
             ));
         }
 
-        let version = config
-            .api_version
-            .clone()
-            .unwrap_or_else(|| "4.16.0".to_string());
+        let version = config.api_version.as_deref().unwrap_or(DEFAULT_API_VERSION);
+        let version_header = header::HeaderValue::from_str(version).map_err(|_| {
+            LibreLinkUpError::InvalidConfig(format!("invalid api_version '{}'", version))
+        })?;
 
         let region = config.region.unwrap_or_default();
         let base_url_str = region.base_url().to_string();
@@ -229,7 +234,7 @@ impl LibreLinkUpClient {
             "application/json;charset=UTF-8".parse().unwrap(),
         );
         headers.insert("product", "llu.ios".parse().unwrap());
-        headers.insert("version", version.parse().unwrap());
+        headers.insert("version", version_header);
         headers.insert("accept-language", "en-US".parse().unwrap());
 
         let client: Client = Client::builder()
@@ -247,19 +252,19 @@ impl LibreLinkUpClient {
         })
     }
 
-    /// Create a simple client with just username and password
-    ///
-    /// Convenience constructor using default settings.
+    /// Create a client from credentials and an optional region code, with all other settings default.
     ///
     /// # Arguments
     ///
-    /// * `username` - LibreLinkUp account email
-    /// * `password` - LibreLinkUp account password
-    /// * `region` - Optional region string (e.g., "us", "eu"). Auto-detects if None.
+    /// * `username` - LibreLinkUp (follower) account email
+    /// * `password` - LibreLinkUp (follower) account password
+    /// * `region` - Region code such as `"us"` or `"eu"` (case-insensitive; see [`Region`]).
+    ///   `None` or an unrecognized code uses [`Region::Global`], which redirects to the
+    ///   account's region at login.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be built.
+    /// Same as [`new`](Self::new).
     ///
     /// # Examples
     ///
@@ -278,34 +283,13 @@ impl LibreLinkUpClient {
     pub fn simple(
         username: impl Into<String>,
         password: impl Into<String>,
-        region: Option<String>,
+        region: Option<&str>,
     ) -> Result<Self> {
-        let username = username.into();
-        let password = password.into();
-
-        if username.trim().is_empty() {
-            return Err(LibreLinkUpError::AuthFailed(
-                "username must not be empty".to_string(),
-            ));
+        let mut config = ClientConfig::new(username, password);
+        if let Some(region) = region {
+            config = config.with_region(region.parse().unwrap_or_default());
         }
-        if password.is_empty() {
-            return Err(LibreLinkUpError::AuthFailed(
-                "password must not be empty".to_string(),
-            ));
-        }
-
-        let region_enum = region
-            .as_ref()
-            .and_then(|s| Region::from_str(s).ok())
-            .or(Some(Region::default()));
-
-        Self::new(ClientConfig {
-            username,
-            password,
-            api_version: None,
-            region: region_enum,
-            connection_identifier: None,
-        })
+        Self::new(config)
     }
 
     /// Login to the LibreLinkUp service
@@ -532,11 +516,15 @@ impl LibreLinkUpClient {
         self.authenticated_request(ACCOUNT_ENDPOINT).await
     }
 
-    /// Get logbook (glucose events/alarms) for a patient (authenticated).
+    /// Get a patient's logbook: glucose events and alarms (authenticated).
+    ///
+    /// Entries are raw API data; `value` is in the account's display unit, so use
+    /// `value_in_mg_per_dl` for a fixed unit.
     ///
     /// # Arguments
     ///
-    /// * `patient_id` - Patient/connection ID (same as used for [`read`](Self::read) / [`read_raw`](Self::read_raw)).
+    /// * `patient_id` - [`Connection::patient_id`], e.g. from
+    ///   [`read_raw`](Self::read_raw)`().await?.connection.patient_id`.
     ///
     /// # Example
     ///
@@ -544,14 +532,11 @@ impl LibreLinkUpClient {
     /// use libre_link_up_api_client::LibreLinkUpClient;
     ///
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = LibreLinkUpClient::simple(
-    ///     "user@example.com".to_string(),
-    ///     "password".to_string(),
-    ///     None,
-    /// )?;
-    /// let logbook = client.get_logbook("patient-id").await?;
+    /// let client = LibreLinkUpClient::simple("user@example.com", "password", None)?;
+    /// let patient_id = client.read_raw().await?.connection.patient_id;
+    /// let logbook = client.get_logbook(&patient_id).await?;
     /// for entry in &logbook.data {
-    ///     println!("{} {}", entry.timestamp, entry.value);
+    ///     println!("{} {} mg/dL", entry.timestamp, entry.value_in_mg_per_dl);
     /// }
     /// # Ok(())
     /// # }
@@ -626,7 +611,8 @@ impl LibreLinkUpClient {
         country: &str,
         version: Option<&str>,
     ) -> Result<CountryConfigResponse> {
-        let version = version.unwrap_or_else(|| self.config.api_version.as_deref().unwrap_or("4.16.0"));
+        let version =
+            version.unwrap_or_else(|| self.config.api_version.as_deref().unwrap_or("4.16.0"));
         let url = format!(
             "{}{}?country={}&version={}",
             Region::Global.base_url(),
@@ -665,17 +651,24 @@ impl LibreLinkUpClient {
         }
     }
 
-    /// Read raw glucose data from the API
+    /// Fetch the selected patient's graph data as the API returns it.
     ///
-    /// Returns unparsed API responses with all available data including
-    /// connection info, active sensors, and glucose measurements.
+    /// Use this when you need fields that [`read`](Self::read) drops (patient details, sensor,
+    /// alarm rules, the display unit). Glucose values here are not normalized; see
+    /// [`ReadRawResponse`].
+    ///
+    /// Logs in on first use and again if a request fails. The patient is chosen on the first
+    /// call (see [`ClientConfig::connection_identifier`]) and reused afterwards.
     ///
     /// # Errors
     ///
-    /// - [`LibreLinkUpError::NoConnections`] if no patients are being followed
-    /// - [`LibreLinkUpError::AuthFailed`] if authentication fails
+    /// - Login errors: [`LibreLinkUpError::BadCredentials`], [`LibreLinkUpError::AccountLocked`],
+    ///   [`LibreLinkUpError::AdditionalActionRequired`]
+    /// - [`LibreLinkUpError::NoConnections`] if the account follows no patients
+    /// - [`LibreLinkUpError::ConnectionNotFound`] / [`LibreLinkUpError::ConnectionFunctionFailed`]
+    ///   if the configured [`ConnectionIdentifier`] matches no patient
     /// - [`LibreLinkUpError::Http`] for network errors
-    /// - [`LibreLinkUpError::InvalidResponse`] if API response is malformed
+    /// - [`LibreLinkUpError::InvalidResponse`] for an error status or unexpected response body
     ///
     /// # Examples
     ///
@@ -683,11 +676,7 @@ impl LibreLinkUpClient {
     /// use libre_link_up_api_client::LibreLinkUpClient;
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = LibreLinkUpClient::simple(
-    ///     "email@example.com".to_string(),
-    ///     "password".to_string(),
-    ///     None,
-    /// )?;
+    /// let client = LibreLinkUpClient::simple("email@example.com", "password", None)?;
     ///
     /// let raw = client.read_raw().await?;
     /// println!("Connection: {:?}", raw.connection);
@@ -721,17 +710,16 @@ impl LibreLinkUpClient {
         })
     }
 
-    /// Read current and historical glucose data
+    /// Fetch the selected patient's latest reading and recent history, normalized to
+    /// [`LibreCgmData`] (mg/dL, UTC timestamps).
     ///
-    /// Returns processed glucose data with current reading and historical measurements.
-    /// Automatically handles authentication and connection management.
+    /// History points whose timestamp cannot be parsed are left out of
+    /// [`ReadResponse::history`].
     ///
     /// # Errors
     ///
-    /// - [`LibreLinkUpError::NoConnections`] if no patients are being followed
-    /// - [`LibreLinkUpError::AuthFailed`] if authentication fails
-    /// - [`LibreLinkUpError::Http`] for network errors
-    /// - [`LibreLinkUpError::InvalidResponse`] if API response is malformed
+    /// Everything [`read_raw`](Self::read_raw) can return, plus
+    /// [`LibreLinkUpError::InvalidResponse`] if the latest reading's timestamp cannot be parsed.
     ///
     /// # Examples
     ///
@@ -739,14 +727,10 @@ impl LibreLinkUpClient {
     /// use libre_link_up_api_client::LibreLinkUpClient;
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = LibreLinkUpClient::simple(
-    ///     "email@example.com".to_string(),
-    ///     "password".to_string(),
-    ///     None,
-    /// )?;
+    /// let client = LibreLinkUpClient::simple("email@example.com", "password", None)?;
     ///
     /// let data = client.read().await?;
-    /// println!("Current glucose: {:.1} mg/dL", data.current.value);
+    /// println!("Current glucose: {:.1} mg/dL", data.current.value_mg_dl);
     /// println!("Trend: {:?}", data.current.trend);
     /// println!("Historical readings: {}", data.history.len());
     /// # Ok(())
@@ -754,76 +738,94 @@ impl LibreLinkUpClient {
     /// ```
     pub async fn read(&self) -> Result<ReadResponse> {
         let raw = self.read_raw().await?;
-        Ok(ReadResponse {
-            current: map_glucose_data(&raw.connection.glucose_measurement),
-            history: raw.graph_data.iter().map(map_glucose_data).collect(),
-        })
+        let current = LibreCgmData::try_from(&raw.connection.glucose_measurement)?;
+        // A history point with an unparseable timestamp cannot be placed in time; drop it
+        // rather than failing the whole read or inventing a time.
+        let history = raw
+            .graph_data
+            .iter()
+            .filter_map(|item| LibreCgmData::try_from(item).ok())
+            .collect();
+        Ok(ReadResponse { current, history })
     }
 
-    /// Read averaged glucose data over time
+    /// Start a background task that polls [`read`](Self::read) and reports an average every
+    /// `sample_count` distinct readings.
     ///
-    /// Polls the API at regular intervals and calculates averages when the specified
-    /// number of readings have been collected. The callback is invoked with the
-    /// current reading, recent readings used for averaging, and full history.
+    /// Every `interval` the task reads the latest reading and keeps it if its timestamp is new.
+    /// Once `sample_count` readings are collected it calls
+    /// `on_average(average, samples, history)` and starts collecting again:
     ///
-    /// # Arguments
+    /// * `average` - mean `value_mg_dl` (rounded) and mean trend of `samples`, with the
+    ///   timestamp, `is_high` and `is_low` of the newest sample. Samples without a computable
+    ///   trend are left out of the trend mean; if none has one, the trend is `NotComputable`.
+    /// * `samples` - the readings that were averaged, oldest first.
+    /// * `history` - [`ReadResponse::history`] from the latest poll.
     ///
-    /// * `amount` - Number of readings to collect before averaging
-    /// * `callback` - Function called with (current, averaged_history, full_history)
-    /// * `interval_ms` - Polling interval in milliseconds
-    ///
-    /// # Returns
-    ///
-    /// Returns a `JoinHandle` for the background polling task. Call `.abort()` on it to stop.
+    /// Failed polls are skipped silently. The task uses its own client (and login session)
+    /// built from this client's configuration, and runs until you call `abort()` on the
+    /// returned handle.
     ///
     /// # Errors
     ///
-    /// Returns an error if the client cannot be cloned for background operation.
+    /// - [`LibreLinkUpError::InvalidConfig`] if `sample_count` or `interval` is zero
+    /// - Anything [`new`](Self::new) can return
     ///
     /// # Examples
     ///
     /// ```no_run
     /// use libre_link_up_api_client::LibreLinkUpClient;
+    /// use std::time::Duration;
     ///
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = LibreLinkUpClient::simple(
-    ///     "email@example.com".to_string(),
-    ///     "password".to_string(),
-    ///     None,
-    /// )?;
+    /// let client = LibreLinkUpClient::simple("email@example.com", "password", None)?;
     ///
-    /// let handle = client.read_averaged(
-    ///     10,  // Average 10 readings
-    ///     |current, averaged, history| {
-    ///         println!("Current: {:.1} mg/dL", current.value);
-    ///         let avg = averaged.iter().map(|d| d.value).sum::<f64>() / averaged.len() as f64;
-    ///         println!("Average: {:.1} mg/dL", avg);
+    /// let handle = client.poll_averaged(
+    ///     5,
+    ///     Duration::from_secs(60),
+    ///     |average, samples, _history| {
+    ///         println!(
+    ///             "Average of {} readings: {:.0} mg/dL ({:?})",
+    ///             samples.len(),
+    ///             average.value_mg_dl,
+    ///             average.trend
+    ///         );
     ///     },
-    ///     60000,  // Poll every 60 seconds
     /// ).await?;
     ///
-    /// // Later: handle.abort() to stop polling
+    /// // Later, to stop polling:
+    /// handle.abort();
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn read_averaged<F>(
+    pub async fn poll_averaged<F>(
         &self,
-        amount: usize,
-        mut callback: F,
-        interval_ms: u64,
+        sample_count: usize,
+        interval: Duration,
+        mut on_average: F,
     ) -> Result<tokio::task::JoinHandle<()>>
     where
         F: FnMut(LibreCgmData, Vec<LibreCgmData>, Vec<LibreCgmData>) + Send + 'static,
     {
+        if sample_count == 0 {
+            return Err(LibreLinkUpError::InvalidConfig(
+                "sample_count must be at least 1".to_string(),
+            ));
+        }
+        if interval.is_zero() {
+            return Err(LibreLinkUpError::InvalidConfig(
+                "interval must be greater than zero".to_string(),
+            ));
+        }
+
         let client = Self::new(self.config.clone())?;
 
         let handle = tokio::spawn(async move {
             let mut memory: Vec<LibreCgmData> = Vec::new();
-            let mut interval =
-                tokio::time::interval(tokio::time::Duration::from_millis(interval_ms));
+            let mut ticker = tokio::time::interval(interval);
 
             loop {
-                interval.tick().await;
+                ticker.tick().await;
 
                 if let Ok(read_response) = client.read().await {
                     let current = read_response.current;
@@ -834,31 +836,29 @@ impl LibreLinkUpClient {
                         memory.push(current.clone());
                     }
 
-                    if memory.len() >= amount {
-                        // Calculate average
+                    if memory.len() >= sample_count {
                         let avg_value =
-                            memory.iter().map(|m| m.value).sum::<f64>() / memory.len() as f64;
+                            memory.iter().map(|m| m.value_mg_dl).sum::<f64>() / memory.len() as f64;
 
+                        // NotComputable sits at index 0 of TREND_MAP; averaging it in would
+                        // bias the result toward "falling", so only computable trends count.
                         let trend_indices: Vec<usize> = memory
                             .iter()
+                            .filter(|m| m.trend != TrendType::NotComputable)
                             .filter_map(|m| TREND_MAP.iter().position(|&t| t == m.trend))
                             .collect();
 
-                        let avg_trend_idx = if !trend_indices.is_empty() {
-                            (trend_indices.iter().sum::<usize>() as f64
-                                / trend_indices.len() as f64)
-                                .round() as usize
+                        let avg_trend = if trend_indices.is_empty() {
+                            TrendType::NotComputable
                         } else {
-                            3 // Default to Flat
+                            let idx = (trend_indices.iter().sum::<usize>() as f64
+                                / trend_indices.len() as f64)
+                                .round() as usize;
+                            TREND_MAP[idx]
                         };
 
-                        let avg_trend = TREND_MAP
-                            .get(avg_trend_idx)
-                            .copied()
-                            .unwrap_or(TREND_MAP[3]);
-
                         let averaged = LibreCgmData {
-                            value: avg_value.round(),
+                            value_mg_dl: avg_value.round(),
                             is_high: current.is_high,
                             is_low: current.is_low,
                             trend: avg_trend,
@@ -867,12 +867,51 @@ impl LibreLinkUpClient {
 
                         // Move the collected readings into the callback without cloning
                         let collected = std::mem::take(&mut memory);
-                        callback(averaged, collected, history);
+                        on_average(averaged, collected, history);
                     }
                 }
             }
         });
 
         Ok(handle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_invalid_config<T>(result: Result<T>) -> bool {
+        matches!(result, Err(LibreLinkUpError::InvalidConfig(_)))
+    }
+
+    #[test]
+    fn empty_credentials_are_invalid_config() {
+        assert!(is_invalid_config(LibreLinkUpClient::simple(
+            " ", "pw", None
+        )));
+        assert!(is_invalid_config(LibreLinkUpClient::simple(
+            "me@example.com",
+            "",
+            None
+        )));
+    }
+
+    #[test]
+    fn bad_api_version_is_invalid_config_not_a_panic() {
+        let config = ClientConfig::new("me@example.com", "pw").with_api_version("4.16\n0");
+        assert!(is_invalid_config(LibreLinkUpClient::new(config)));
+    }
+
+    #[tokio::test]
+    async fn poll_averaged_rejects_zero_sample_count_and_interval() {
+        let client = LibreLinkUpClient::simple("me@example.com", "pw", None).unwrap();
+        let noop = |_, _, _| {};
+        assert!(is_invalid_config(
+            client.poll_averaged(0, Duration::from_secs(1), noop).await
+        ));
+        assert!(is_invalid_config(
+            client.poll_averaged(1, Duration::ZERO, noop).await
+        ));
     }
 }

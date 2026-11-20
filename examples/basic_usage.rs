@@ -8,16 +8,16 @@ use libre_link_up_api_client::{ClientConfig, ConnectionIdentifier, LibreLinkUpCl
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Simple usage with just username and password
     let client = LibreLinkUpClient::simple(
-        "your_email@example.com".to_string(),
-        "your_password".to_string(),
-        None, // Region will auto-detect
+        "your_email@example.com",
+        "your_password",
+        None, // Global endpoint; redirects to the account's region at login
     )?;
 
     // Read current glucose data
     println!("Reading glucose data...");
     let data = client.read().await?;
 
-    println!("Current glucose: {:.1} mg/dL", data.current.value);
+    println!("Current glucose: {:.1} mg/dL", data.current.value_mg_dl);
     println!("Trend: {:?}", data.current.trend);
     println!("Is high: {}", data.current.is_high);
     println!("Is low: {}", data.current.is_low);

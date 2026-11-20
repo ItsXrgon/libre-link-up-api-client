@@ -155,7 +155,7 @@ pub struct GlucoseItem {
     /// Type of glucose reading
     #[serde(rename = "type")]
     pub item_type: i32,
-    /// Value in mg/dL
+    /// Glucose value in mg/dL, whatever the account's display unit
     #[serde(rename = "ValueInMgPerDl")]
     pub value_in_mg_per_dl: f64,
     /// Trend arrow direction (0-6, None if not available)
@@ -170,7 +170,7 @@ pub struct GlucoseItem {
     /// Glucose units (0 = mg/dL, 1 = mmol/L)
     #[serde(rename = "GlucoseUnits")]
     pub glucose_units: i32,
-    /// Glucose value in configured units
+    /// Glucose value in the account's display unit (see `glucose_units`). Use `value_in_mg_per_dl` for a fixed unit.
     #[serde(rename = "Value")]
     pub value: f64,
     /// Whether the value is above target high
@@ -196,7 +196,7 @@ pub struct GlucoseMeasurement {
     /// Type of glucose reading
     #[serde(rename = "type")]
     pub item_type: i32,
-    /// Value in mg/dL
+    /// Glucose value in mg/dL, whatever the account's display unit
     #[serde(rename = "ValueInMgPerDl")]
     pub value_in_mg_per_dl: f64,
     /// Trend arrow direction (0-6, always present)
@@ -211,7 +211,7 @@ pub struct GlucoseMeasurement {
     /// Glucose units (0 = mg/dL, 1 = mmol/L)
     #[serde(rename = "GlucoseUnits")]
     pub glucose_units: i32,
-    /// Glucose value in configured units
+    /// Glucose value in the account's display unit (see `glucose_units`). Use `value_in_mg_per_dl` for a fixed unit.
     #[serde(rename = "Value")]
     pub value: f64,
     /// Whether the value is above target high

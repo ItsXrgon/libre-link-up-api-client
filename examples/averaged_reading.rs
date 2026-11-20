@@ -1,43 +1,41 @@
-//! Example of reading averaged glucose data over time
+//! Example of averaging glucose readings in the background
+//!
+//! Run with: cargo run --example averaged_reading
 
 use libre_link_up_api_client::LibreLinkUpClient;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = LibreLinkUpClient::simple(
-        "your_email@example.com".to_string(),
-        "your_password".to_string(),
-        None, // Region will auto-detect
+        "your_email@example.com",
+        "your_password",
+        None, // Global endpoint; redirects to the account's region at login
     )?;
 
-    println!("Starting averaged reading (collecting 5 readings every 15 seconds)...");
+    println!("Polling every 15 seconds, averaging every 5 distinct readings...");
 
-    // Collect 5 readings and calculate average
     let handle = client
-        .read_averaged(
-            5,
-            |average, memory, _history| {
-                println!("\n=== Average Calculated ===");
-                println!("Average value: {:.1} mg/dL", average.value);
-                println!("Average trend: {:?}", average.trend);
-                println!("Based on {} readings:", memory.len());
-                for (i, reading) in memory.iter().enumerate() {
-                    println!(
-                        "  {}. {:.1} mg/dL at {}",
-                        i + 1,
-                        reading.value,
-                        reading.timestamp
-                    );
-                }
-            },
-            15000, // 15 second intervals
-        )
+        .poll_averaged(5, Duration::from_secs(15), |average, samples, _history| {
+            println!("\n=== Average Calculated ===");
+            println!("Average value: {:.1} mg/dL", average.value_mg_dl);
+            println!("Average trend: {:?}", average.trend);
+            println!("Based on {} readings:", samples.len());
+            for (i, reading) in samples.iter().enumerate() {
+                println!(
+                    "  {}. {:.1} mg/dL at {}",
+                    i + 1,
+                    reading.value_mg_dl,
+                    reading.timestamp
+                );
+            }
+        })
         .await?;
 
     // Let it run for a while (this would normally run indefinitely)
-    tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+    tokio::time::sleep(Duration::from_secs(120)).await;
 
-    // Cancel the background task
+    // Stop the background task
     handle.abort();
 
     Ok(())
