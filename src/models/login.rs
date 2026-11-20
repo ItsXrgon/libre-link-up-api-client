@@ -74,16 +74,24 @@ pub struct LockoutInfo {
     pub lockout: i32,
 }
 
-/// Step data for additional authentication requirements (MFA, email verification, etc.)
+/// Step data for additional authentication requirements (terms of use, privacy policy,
+/// MFA, email verification, ...).
+///
+/// Step responses differ by step type, so everything except `step` is optional and missing
+/// fields deserialize to their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepData {
     pub step: Step,
+    #[serde(default)]
     pub user: StepUser,
-    #[serde(rename = "authTicket")]
+    #[serde(default, rename = "authTicket")]
     pub auth_ticket: AuthTicket,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// The action the account must complete, e.g. `tou` (accept terms of use) or `pp`
+/// (accept privacy policy). Missing fields deserialize to empty values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Step {
     #[serde(rename = "type")]
     pub step_type: String,
@@ -92,12 +100,14 @@ pub struct Step {
     pub props: StepProps,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct StepProps {
     pub email: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct StepUser {
     pub id: String,
     #[serde(rename = "accountType")]

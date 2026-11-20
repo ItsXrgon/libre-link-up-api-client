@@ -18,6 +18,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full async/await support with Tokio
 - Type-safe API with proper Rust types
 
+## [0.4.1] - 2026-11-20
+
+### Fixed
+- Login now returns `LibreLinkUpError::AdditionalActionRequired` when the account must accept
+  updated terms of use (`"tou"`) or privacy policy (`"pp"`), instead of
+  `InvalidResponse("Failed to parse JSON: data did not match any variant ...")`. The login
+  body is now classified by `status` and a few known fields before any typed
+  deserialization, and the step name comes from `step.componentName`, falling back to
+  `step.type`, then `"unknown"`.
+- Unrecognized login responses now produce `InvalidResponse` naming the login status and the
+  keys under `data`. Values from the body (tokens, emails, ...) are never included.
+
+### Changed
+- `StepData`, `Step`, `StepProps` and `StepUser` accept step responses with missing fields:
+  everything except `step` defaults when absent. Field types are unchanged.
+  `AuthTicket`, `Step`, `StepProps` and `StepUser` now implement `Default`.
+
 ## [0.4.0] - 2026-11-20
 
 ### Fixed

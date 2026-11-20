@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Authentication ticket with token and expiration information
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuthTicket {
     /// JWT authentication token
     pub token: String,

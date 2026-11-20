@@ -11,7 +11,7 @@ use crate::{
         countries::CountryConfigResponse,
         graph::GraphResponse,
         logbook::LogbookResponse,
-        login::{AccountResponse, LoginArgs, LoginResponse, LoginResponseData, UserResponse},
+        login::{AccountResponse, Data as LoginData, LoginArgs, UserResponse},
         notifications::NotificationSettingsResponse,
         region::Region,
     },
@@ -19,6 +19,7 @@ use crate::{
 };
 use reqwest::{Client, header};
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
@@ -37,6 +38,99 @@ const NOTIFICATIONS_SETTINGS_ENDPOINT: &str = "/llu/notifications/settings";
 /// Selector for [`ConnectionIdentifier::ByFunction`]: given the followed patients, returns the
 /// `patient_id` of the one to read, or `None` if none fits.
 type ConnectionFn = Arc<dyn Fn(&[Connection]) -> Option<String> + Send + Sync>;
+
+/// What a login response tells the client to do next.
+#[derive(Debug, PartialEq, Eq)]
+enum LoginOutcome {
+    /// Logged in; use this token and account id for authenticated requests.
+    Authenticated { token: String, account_id: String },
+    /// The account lives in another region; log in again there.
+    Redirect { region: String },
+}
+
+/// Interprets a login response body.
+///
+/// The body is inspected as untyped JSON first, because the shape of `data` depends on the
+/// outcome and step responses (terms of use, privacy policy, ...) vary. Only a successful
+/// login is deserialized into a typed struct.
+///
+/// Errors never contain values from the body (tokens, emails, ...): at most the login
+/// status and the names of the keys under `data`.
+fn classify_login_response(body: &str) -> Result<LoginOutcome> {
+    let value: Value = serde_json::from_str(body).map_err(|e| {
+        // serde_json's syntax errors report only the position, not the content.
+        LibreLinkUpError::InvalidResponse(format!("login response is not valid JSON: {}", e))
+    })?;
+    let status = value.get("status").and_then(Value::as_i64);
+    let data = value.get("data");
+    let field = |path: &str| data.and_then(|d| d.pointer(path));
+
+    if field("/redirect").and_then(Value::as_bool) == Some(true) {
+        let region = field("/region").and_then(Value::as_str).ok_or_else(|| {
+            unexpected_login_response("login redirect without a region", status, data)
+        })?;
+        return Ok(LoginOutcome::Redirect {
+            region: region.to_string(),
+        });
+    }
+
+    if let Some(lockout) = field("/data/lockout").and_then(Value::as_i64) {
+        return Err(LibreLinkUpError::AccountLocked(
+            i32::try_from(lockout).unwrap_or(i32::MAX),
+        ));
+    }
+
+    match status {
+        Some(2) => Err(LibreLinkUpError::BadCredentials),
+        Some(4) => {
+            let non_empty_str = |path: &str| {
+                field(path)
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+            };
+            let step = non_empty_str("/step/componentName")
+                .or_else(|| non_empty_str("/step/type"))
+                .unwrap_or("unknown");
+            Err(LibreLinkUpError::AdditionalActionRequired(step.to_string()))
+        }
+        Some(0) => {
+            // The serde error is not included: it can quote values from the body.
+            let complete: LoginData = data
+                .and_then(|d| serde_json::from_value(d.clone()).ok())
+                .ok_or_else(|| {
+                    unexpected_login_response("unexpected successful login body", status, data)
+                })?;
+            Ok(LoginOutcome::Authenticated {
+                token: complete.auth_ticket.token,
+                account_id: complete.user.id,
+            })
+        }
+        _ => Err(unexpected_login_response(
+            "unrecognized login status",
+            status,
+            data,
+        )),
+    }
+}
+
+/// Builds an `InvalidResponse` for a login body that could not be interpreted, naming only
+/// the status and the keys under `data`, never their values.
+fn unexpected_login_response(
+    reason: &str,
+    status: Option<i64>,
+    data: Option<&Value>,
+) -> LibreLinkUpError {
+    let status = status.map_or_else(|| "missing".to_string(), |s| s.to_string());
+    let keys = match data {
+        Some(Value::Object(map)) => map.keys().cloned().collect::<Vec<_>>().join(", "),
+        Some(_) => "<not an object>".to_string(),
+        None => "<missing>".to_string(),
+    };
+    LibreLinkUpError::InvalidResponse(format!(
+        "{} (login status: {}, data keys: [{}])",
+        reason, status, keys
+    ))
+}
 
 /// Client configuration. Build it with [`ClientConfig::new`] and the `with_*` methods.
 ///
@@ -292,8 +386,8 @@ impl LibreLinkUpClient {
         Self::new(config)
     }
 
-    /// Login to the LibreLinkUp service
-    async fn login(&self) -> Result<LoginResponse> {
+    /// Log in and store the token and account id, following a regional redirect if needed.
+    async fn login(&self) -> Result<()> {
         let base_url = self.base_url.read().await.clone();
         let url = format!("{}{}", base_url, LOGIN_ENDPOINT);
 
@@ -317,52 +411,22 @@ impl LibreLinkUpClient {
             )));
         }
 
-        // Try to parse JSON with better error handling
         let text = response.text().await?;
 
-        let login_response: LoginResponse = serde_json::from_str(&text).map_err(|e| {
-            LibreLinkUpError::InvalidResponse(format!("Failed to parse JSON: {}", e))
-        })?;
-
-        // Check for account lockout
-        if let LoginResponseData::Locked(locked_data) = &login_response.data {
-            return Err(LibreLinkUpError::AccountLocked(locked_data.data.lockout));
+        match classify_login_response(&text)? {
+            LoginOutcome::Redirect { region } => self.handle_redirect(&region).await,
+            LoginOutcome::Authenticated { token, account_id } => {
+                *self.jwt_token.write().await = Some(token);
+                *self.account_id.write().await = Some(account_id);
+                Ok(())
+            }
         }
-
-        // Check for bad credentials
-        if login_response.status == 2 {
-            return Err(LibreLinkUpError::BadCredentials);
-        }
-
-        // Check for additional action required (MFA, etc.)
-        if login_response.status == 4 {
-            let component_name = match &login_response.data {
-                LoginResponseData::Step(step_data) => step_data.step.component_name.clone(),
-                _ => "unknown".to_string(),
-            };
-            return Err(LibreLinkUpError::AdditionalActionRequired(component_name));
-        }
-
-        // Handle regional redirect
-        if let LoginResponseData::Redirect(redirect_data) = &login_response.data
-            && redirect_data.redirect
-        {
-            return self.handle_redirect(redirect_data.region.clone()).await;
-        }
-
-        // Extract token and account ID
-        if let LoginResponseData::Complete(data) = &login_response.data {
-            *self.jwt_token.write().await = Some(data.auth_ticket.token.clone());
-            *self.account_id.write().await = Some(data.user.id.clone());
-        }
-
-        Ok(login_response)
     }
 
     /// Handle regional redirect during login
-    async fn handle_redirect(&self, region: String) -> Result<LoginResponse> {
+    async fn handle_redirect(&self, region: &str) -> Result<()> {
         // Parse region string (FromStr never fails, defaults to Global)
-        let region_enum = Region::from_str(&region).unwrap();
+        let region_enum = Region::from_str(region).unwrap();
         let region_url = region_enum.base_url().to_string();
         *self.base_url.write().await = region_url;
 
@@ -913,5 +977,142 @@ mod tests {
         assert!(is_invalid_config(
             client.poll_averaged(1, Duration::ZERO, noop).await
         ));
+    }
+
+    mod login_response {
+        use super::*;
+        use crate::models::login::{LoginResponse, LoginResponseData};
+        use serde_json::json;
+
+        const TOKEN: &str = "secret-token-value";
+
+        fn classify(body: Value) -> Result<LoginOutcome> {
+            classify_login_response(&body.to_string())
+        }
+
+        fn tou_step() -> Value {
+            json!({"status": 4, "data": {
+                "step": {"type": "tou", "componentName": "tou", "props": {"reaccept": true, "type": "tou"}},
+                "user": {"accountType": "pat", "country": "DE", "uiLanguage": "de-DE"},
+                "authTicket": {"token": TOKEN, "expires": 1700000000, "duration": 3600000}
+            }})
+        }
+
+        fn action_required(result: Result<LoginOutcome>) -> String {
+            match result {
+                Err(LibreLinkUpError::AdditionalActionRequired(step)) => step,
+                other => panic!("expected AdditionalActionRequired, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn terms_of_use_step_is_action_required() {
+            assert_eq!(action_required(classify(tou_step())), "tou");
+        }
+
+        #[test]
+        fn privacy_policy_step_is_action_required() {
+            let body = json!({"status": 4, "data": {
+                "step": {"type": "pp", "componentName": "pp", "props": {"reaccept": true, "type": "pp"}},
+                "user": {"accountType": "pat", "country": "DE", "uiLanguage": "de-DE"},
+                "authTicket": {"token": TOKEN, "expires": 1700000000, "duration": 3600000}
+            }});
+            assert_eq!(action_required(classify(body)), "pp");
+        }
+
+        #[test]
+        fn step_without_component_name_uses_type() {
+            let body = json!({"status": 4, "data": {"step": {"type": "verifyEmail"}}});
+            assert_eq!(action_required(classify(body)), "verifyEmail");
+        }
+
+        #[test]
+        fn step_without_name_or_type_is_unknown() {
+            let body = json!({"status": 4, "data": {}});
+            assert_eq!(action_required(classify(body)), "unknown");
+        }
+
+        #[test]
+        fn lockout_is_account_locked() {
+            let body = json!({"status": 429, "data": {
+                "code": 60, "data": {"failures": 5, "interval": 60, "lockout": 300}, "message": "locked"
+            }});
+            assert!(matches!(
+                classify(body),
+                Err(LibreLinkUpError::AccountLocked(300))
+            ));
+        }
+
+        #[test]
+        fn status_2_is_bad_credentials() {
+            let body = json!({"status": 2, "error": {"message": "notAuthenticated"}});
+            assert!(matches!(
+                classify(body),
+                Err(LibreLinkUpError::BadCredentials)
+            ));
+        }
+
+        #[test]
+        fn redirect_returns_region() {
+            let body = json!({"status": 0, "data": {"redirect": true, "region": "eu"}});
+            assert_eq!(
+                classify(body).unwrap(),
+                LoginOutcome::Redirect {
+                    region: "eu".to_string()
+                }
+            );
+        }
+
+        #[test]
+        fn minimal_successful_login_is_authenticated() {
+            let body = json!({"status": 0, "data": {
+                "user": {"id": "user-123"},
+                "messages": {},
+                "notifications": {},
+                "authTicket": {"token": TOKEN, "expires": 1700000000, "duration": 3600000}
+            }});
+            assert_eq!(
+                classify(body).unwrap(),
+                LoginOutcome::Authenticated {
+                    token: TOKEN.to_string(),
+                    account_id: "user-123".to_string()
+                }
+            );
+        }
+
+        fn invalid_response_message(result: Result<LoginOutcome>) -> String {
+            match result {
+                Err(LibreLinkUpError::InvalidResponse(msg)) => msg,
+                other => panic!("expected InvalidResponse, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn unknown_status_is_invalid_response_without_values() {
+            let mut body = tou_step();
+            body["status"] = json!(7);
+            let msg = invalid_response_message(classify(body));
+            assert!(msg.contains("login status: 7"), "{}", msg);
+            assert!(msg.contains("authTicket"), "{}", msg);
+            assert!(!msg.contains(TOKEN), "{}", msg);
+            assert!(!msg.contains("DE"), "{}", msg);
+        }
+
+        #[test]
+        fn malformed_successful_login_is_invalid_response_without_values() {
+            let body = json!({"status": 0, "data": {"authTicket": {"token": TOKEN}}});
+            let msg = invalid_response_message(classify(body));
+            assert!(msg.contains("login status: 0"), "{}", msg);
+            assert!(!msg.contains(TOKEN), "{}", msg);
+        }
+
+        #[test]
+        fn public_login_response_type_accepts_terms_step() {
+            let parsed: LoginResponse = serde_json::from_value(tou_step()).unwrap();
+            match parsed.data {
+                LoginResponseData::Step(step) => assert_eq!(step.step.component_name, "tou"),
+                other => panic!("expected Step, got {:?}", other),
+            }
+        }
     }
 }
