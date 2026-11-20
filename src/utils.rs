@@ -1,16 +1,24 @@
-//! Utilities for mapping API glucose data to [`LibreCgmData`].
+//! Conversion from raw API glucose readings to [`LibreCgmData`].
 //!
-//! Main entry: [`map_glucose_data`].
+//! Public entry points are the `TryFrom<&GlucoseItem>` and `TryFrom<&GlucoseMeasurement>`
+//! impls for [`LibreCgmData`].
 
-use crate::models::{
-    LibreCgmData,
-    client::TrendType,
-    common::{GlucoseItem, GlucoseMeasurement},
+use crate::{
+    errors::{LibreLinkUpError, Result},
+    models::{
+        LibreCgmData,
+        client::TrendType,
+        common::{GlucoseItem, GlucoseMeasurement},
+    },
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
 
-/// Maps API trend arrow index (0–6) to [`TrendType`]. Used when converting raw readings.
-pub const TREND_MAP: [TrendType; 7] = [
+/// API `TrendArrow` index (0–6) to [`TrendType`].
+///
+/// Indices 0 and 6 (and any index outside this table, see [`trend_from_arrow`]) mean the
+/// sensor could not compute a trend. The order also runs from falling to rising, which
+/// `poll_averaged` relies on to average trends.
+pub(crate) const TREND_MAP: [TrendType; 7] = [
     TrendType::NotComputable,
     TrendType::SingleDown,
     TrendType::FortyFiveDown,
@@ -20,17 +28,25 @@ pub const TREND_MAP: [TrendType; 7] = [
     TrendType::NotComputable,
 ];
 
-/// Converts an API trend arrow index to [`TrendType`]. Returns [`TrendType::Flat`] if missing or out of range.
-pub fn get_trend(trend_arrow: Option<i32>) -> TrendType {
+/// Converts an API `TrendArrow` to [`TrendType`].
+///
+/// A missing, negative or out-of-range arrow is [`TrendType::NotComputable`]: an unknown
+/// trend must not be reported as stable.
+pub(crate) fn trend_from_arrow(trend_arrow: Option<i32>) -> TrendType {
     trend_arrow
-        .and_then(|arrow| TREND_MAP.get(arrow as usize).copied())
-        .unwrap_or(TrendType::Flat)
+        .and_then(|arrow| usize::try_from(arrow).ok())
+        .and_then(|idx| TREND_MAP.get(idx).copied())
+        .unwrap_or(TrendType::NotComputable)
 }
 
-/// Implemented by API types that can be converted to [`LibreCgmData`] via [`map_glucose_data`].
-pub trait GlucoseData {
+/// Format of the API's `FactoryTimestamp` field (always UTC).
+const FACTORY_TIMESTAMP_FORMAT: &str = "%m/%d/%Y %I:%M:%S %p";
+
+/// The fields shared by [`GlucoseItem`] and [`GlucoseMeasurement`] that [`map_glucose_data`] needs.
+trait GlucoseData {
     fn factory_timestamp(&self) -> &str;
-    fn value(&self) -> f64;
+    /// Glucose value in mg/dL, regardless of the account's display unit.
+    fn value_mg_dl(&self) -> f64;
     fn is_high(&self) -> bool;
     fn is_low(&self) -> bool;
     fn trend_arrow(&self) -> Option<i32>;
@@ -40,8 +56,9 @@ impl GlucoseData for GlucoseItem {
     fn factory_timestamp(&self) -> &str {
         &self.factory_timestamp
     }
-    fn value(&self) -> f64 {
-        self.value
+    fn value_mg_dl(&self) -> f64 {
+        // `Value` is in the account's display unit (mg/dL or mmol/L); `ValueInMgPerDl` is always mg/dL.
+        self.value_in_mg_per_dl
     }
     fn is_high(&self) -> bool {
         self.is_high
@@ -58,8 +75,9 @@ impl GlucoseData for GlucoseMeasurement {
     fn factory_timestamp(&self) -> &str {
         &self.factory_timestamp
     }
-    fn value(&self) -> f64 {
-        self.value
+    fn value_mg_dl(&self) -> f64 {
+        // `Value` is in the account's display unit (mg/dL or mmol/L); `ValueInMgPerDl` is always mg/dL.
+        self.value_in_mg_per_dl
     }
     fn is_high(&self) -> bool {
         self.is_high
@@ -72,61 +90,155 @@ impl GlucoseData for GlucoseMeasurement {
     }
 }
 
-/// Converts a [`GlucoseData`] item (e.g. [`GlucoseItem`], [`GlucoseMeasurement`]) into [`LibreCgmData`]. Uses [`get_trend`] for the trend; parses timestamp or falls back to now.
-pub fn map_glucose_data<T: GlucoseData>(item: &T) -> LibreCgmData {
-    let parsed = NaiveDateTime::parse_from_str(
-        item.factory_timestamp(),
-        "%m/%d/%Y %I:%M:%S %p",
-    );
+/// Builds a [`LibreCgmData`]. Fails with [`LibreLinkUpError::InvalidResponse`] if
+/// `FactoryTimestamp` cannot be parsed: a reading with an unknown time is never stamped
+/// with the current time.
+fn map_glucose_data<T: GlucoseData>(item: &T) -> Result<LibreCgmData> {
+    let timestamp =
+        NaiveDateTime::parse_from_str(item.factory_timestamp(), FACTORY_TIMESTAMP_FORMAT)
+            .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
+            .map_err(|e| {
+                LibreLinkUpError::InvalidResponse(format!(
+                    "unparseable FactoryTimestamp '{}': {}",
+                    item.factory_timestamp(),
+                    e
+                ))
+            })?;
 
-    let timestamp = parsed
-        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
-        .unwrap_or_else(|_| Utc::now());
-
-    LibreCgmData {
-        value: item.value(),
+    Ok(LibreCgmData {
+        value_mg_dl: item.value_mg_dl(),
         is_high: item.is_high(),
         is_low: item.is_low(),
-        trend: get_trend(item.trend_arrow()),
+        trend: trend_from_arrow(item.trend_arrow()),
         timestamp,
+    })
+}
+
+/// Converts a history point from [`read_raw`](crate::LibreLinkUpClient::read_raw).
+///
+/// # Errors
+///
+/// [`LibreLinkUpError::InvalidResponse`] if `FactoryTimestamp` cannot be parsed.
+impl TryFrom<&GlucoseItem> for LibreCgmData {
+    type Error = LibreLinkUpError;
+
+    fn try_from(item: &GlucoseItem) -> Result<Self> {
+        map_glucose_data(item)
+    }
+}
+
+/// Converts the latest reading from [`read_raw`](crate::LibreLinkUpClient::read_raw).
+///
+/// # Errors
+///
+/// [`LibreLinkUpError::InvalidResponse`] if `FactoryTimestamp` cannot be parsed.
+impl TryFrom<&GlucoseMeasurement> for LibreCgmData {
+    type Error = LibreLinkUpError;
+
+    fn try_from(item: &GlucoseMeasurement) -> Result<Self> {
+        map_glucose_data(item)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::common::GlucoseItem;
+    use chrono::TimeZone;
+    use serde_json::json;
+
+    const TS: &str = "10/24/2024 10:00:00 PM";
+
+    fn item(units: i32, value: f64, mg_dl: f64, ts: &str, arrow: Option<i32>) -> GlucoseItem {
+        serde_json::from_value(json!({
+            "FactoryTimestamp": ts,
+            "Timestamp": ts,
+            "type": 0,
+            "ValueInMgPerDl": mg_dl,
+            "TrendArrow": arrow,
+            "TrendMessage": null,
+            "MeasurementColor": 1,
+            "GlucoseUnits": units,
+            "Value": value,
+            "isHigh": false,
+            "isLow": false
+        }))
+        .unwrap()
+    }
+
+    fn measurement(units: i32, value: f64, mg_dl: f64, ts: &str, arrow: i32) -> GlucoseMeasurement {
+        serde_json::from_value(json!({
+            "FactoryTimestamp": ts,
+            "Timestamp": ts,
+            "type": 1,
+            "ValueInMgPerDl": mg_dl,
+            "TrendArrow": arrow,
+            "TrendMessage": null,
+            "MeasurementColor": 1,
+            "GlucoseUnits": units,
+            "Value": value,
+            "isHigh": false,
+            "isLow": false
+        }))
+        .unwrap()
+    }
 
     #[test]
-    fn test_get_trend() {
-        assert_eq!(get_trend(Some(3)), TrendType::Flat);
-        assert_eq!(get_trend(Some(5)), TrendType::SingleUp);
-        assert_eq!(get_trend(Some(0)), TrendType::NotComputable);
-        assert_eq!(get_trend(None), TrendType::Flat);
-        assert_eq!(get_trend(Some(10)), TrendType::Flat);
+    fn test_trend_from_arrow() {
+        assert_eq!(trend_from_arrow(Some(3)), TrendType::Flat);
+        assert_eq!(trend_from_arrow(Some(5)), TrendType::SingleUp);
+        assert_eq!(trend_from_arrow(Some(0)), TrendType::NotComputable);
+        assert_eq!(trend_from_arrow(Some(6)), TrendType::NotComputable);
+        assert_eq!(trend_from_arrow(None), TrendType::NotComputable);
+        assert_eq!(trend_from_arrow(Some(10)), TrendType::NotComputable);
+        assert_eq!(trend_from_arrow(Some(-1)), TrendType::NotComputable);
     }
 
     #[test]
     fn test_map_glucose_data() {
-        let item = GlucoseItem {
-            factory_timestamp: "10/24/2024 10:00:00 AM".to_string(),
-            timestamp: "10/24/2024 10:00:00 AM".to_string(),
-            item_type: 0,
-            value_in_mg_per_dl: 100.0,
-            trend_arrow: Some(3),
-            trend_message: None,
-            measurement_color: 1,
-            glucose_units: 0,
-            value: 100.0,
-            is_high: false,
-            is_low: false,
-        };
-
-        let result = map_glucose_data(&item);
-        assert_eq!(result.value, 100.0);
+        let result = map_glucose_data(&item(0, 100.0, 100.0, TS, Some(3))).unwrap();
+        assert_eq!(result.value_mg_dl, 100.0);
         assert_eq!(result.trend, TrendType::Flat);
+        assert_eq!(
+            result.timestamp,
+            Utc.with_ymd_and_hms(2024, 10, 24, 22, 0, 0).unwrap()
+        );
         assert!(!result.is_high);
         assert!(!result.is_low);
+    }
+
+    #[test]
+    fn mmol_item_maps_to_mg_dl() {
+        let result = LibreCgmData::try_from(&item(1, 6.2, 112.0, TS, Some(3))).unwrap();
+        assert_eq!(result.value_mg_dl, 112.0);
+    }
+
+    #[test]
+    fn mmol_measurement_maps_to_mg_dl() {
+        let result = LibreCgmData::try_from(&measurement(1, 6.2, 112.0, TS, 3)).unwrap();
+        assert_eq!(result.value_mg_dl, 112.0);
+    }
+
+    #[test]
+    fn mg_dl_account_is_unchanged() {
+        let from_item = LibreCgmData::try_from(&item(0, 112.0, 112.0, TS, Some(3))).unwrap();
+        let from_measurement =
+            LibreCgmData::try_from(&measurement(0, 112.0, 112.0, TS, 3)).unwrap();
+        assert_eq!(from_item.value_mg_dl, 112.0);
+        assert_eq!(from_measurement.value_mg_dl, 112.0);
+    }
+
+    #[test]
+    fn bad_timestamp_is_an_error_not_now() {
+        let result = map_glucose_data(&item(0, 100.0, 100.0, "2024-10-24T22:00:00Z", Some(3)));
+        assert!(matches!(result, Err(LibreLinkUpError::InvalidResponse(_))));
+        let result = map_glucose_data(&measurement(0, 100.0, 100.0, "", 3));
+        assert!(matches!(result, Err(LibreLinkUpError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn missing_trend_arrow_is_not_computable() {
+        let result = map_glucose_data(&item(0, 100.0, 100.0, TS, None)).unwrap();
+        assert_eq!(result.trend, TrendType::NotComputable);
     }
 }
 

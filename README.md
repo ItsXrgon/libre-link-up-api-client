@@ -8,7 +8,7 @@ Inspired by [TypeScript libre-link-up-api-client](https://github.com/DiaKEM/libr
 
 ```toml
 [dependencies]
-libre_link_up_api_client = "0.2.1"
+libre_link_up_api_client = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let data = client.read().await?;
-    println!("Glucose: {:.1} mg/dL, trend: {:?}", data.current.value, data.current.trend);
+    println!("Glucose: {:.1} mg/dL, trend: {:?}", data.current.value_mg_dl, data.current.trend);
     Ok(())
 }
 ```
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - Authentication and token handling
 - Regional endpoints (US, EU, JP, DE, FR, AP, AU, AE, CA, LA, RU, CN, etc.)
-- Glucose readings (current, history, raw, averaged)
+- Glucose readings (current, history, raw, averaged), always in mg/dL regardless of the account's display unit
 - User, account, logbook, notification settings, country config
 
 ## Examples

@@ -16,7 +16,7 @@
 //!
 //! Re-exported at crate root: [`ReadResponse`], [`ReadRawResponse`], [`UserResponse`], [`AccountResponse`],
 //! [`LogbookResponse`], [`NotificationSettingsResponse`], [`CountryConfigResponse`], [`LibreCgmData`],
-//! [`TrendType`], [`GlucoseItem`], [`Connection`], [`Region`]. See the [models] module for the full set.
+//! [`TrendType`], [`GlucoseItem`], [`GlucoseMeasurement`], [`Connection`], [`Region`]. See the [models] module for the full set.
 //!
 //! ## Quick Start
 //!
@@ -35,7 +35,7 @@
 //!     // Read current glucose data
 //!     let data = client.read().await?;
 //!
-//!     println!("Current glucose: {:.1} mg/dL", data.current.value);
+//!     println!("Current glucose: {:.1} mg/dL", data.current.value_mg_dl);
 //!     println!("Trend: {:?}", data.current.trend);
 //!     println!("Historical readings: {}", data.history.len());
 //!
@@ -101,7 +101,7 @@
 //!
 //! match client {
 //!     Ok(client) => match client.read().await {
-//!         Ok(data) => println!("Success: {:.1} mg/dL", data.current.value),
+//!         Ok(data) => println!("Success: {:.1} mg/dL", data.current.value_mg_dl),
 //!         Err(LibreLinkUpError::NoConnections) => {
 //!             eprintln!("No patients followed. Start following someone in the app.");
 //!         }
@@ -115,12 +115,12 @@
 pub mod client;
 pub mod errors;
 pub mod models;
-pub mod utils;
+mod utils;
 
-pub use client::{ClientConfig, ConnectionIdentifier, LibreLinkUpClient};
+pub use client::{ClientConfig, ConnectionIdentifier, DEFAULT_API_VERSION, LibreLinkUpClient};
 pub use errors::{LibreLinkUpError, Result};
 pub use models::{
     AccountResponse, Connection, CountryConfigData, CountryConfigResponse, GlucoseItem,
-    LibreCgmData, LogbookEntry, LogbookResponse, NotificationSettingsResponse, ReadRawResponse,
-    ReadResponse, Region, TrendType, UserResponse,
+    GlucoseMeasurement, LibreCgmData, LogbookEntry, LogbookResponse, NotificationSettingsResponse,
+    ReadRawResponse, ReadResponse, Region, TrendType, UserResponse,
 };

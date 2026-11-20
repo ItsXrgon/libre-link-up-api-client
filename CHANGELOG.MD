@@ -18,6 +18,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full async/await support with Tokio
 - Type-safe API with proper Rust types
 
+## [0.4.0] - 2026-11-20
+
+### Fixed
+- Glucose values from `read()` are now always in mg/dL, as documented. They were taken from
+  the API's `Value` field, which is in the account's display unit, so mmol/L accounts got
+  ~6.2 instead of ~112. They now come from `ValueInMgPerDl`.
+- Readings with an unparseable `FactoryTimestamp` are no longer stamped with `Utc::now()`.
+  `read()` returns `LibreLinkUpError::InvalidResponse` if the latest reading's timestamp
+  cannot be parsed, and leaves out history points whose timestamp cannot be parsed.
+- A missing, negative or out-of-range `TrendArrow` now maps to `TrendType::NotComputable`
+  instead of `TrendType::Flat`.
+- Averaged polling no longer counts `NotComputable` readings in the trend mean (they pulled
+  it toward "falling"). If no reading has a computable trend, the result is `NotComputable`
+  (was `Flat`).
+- `ClientConfig::api_version` with characters that are invalid in an HTTP header now returns
+  an error instead of panicking.
+- Documentation fixes: the averaged-polling callback arguments were described in the wrong
+  order, `ConnectionIdentifier::ByName` matches the full name only (not first or last name),
+  and `TrendType` arrows are single arrows (↓/↑), not double.
+
+### Changed (breaking)
+- `LibreCgmData.value` is renamed to `value_mg_dl` (serialized as `valueMgDl`).
+- `read_averaged(amount, callback, interval_ms)` is renamed to
+  `poll_averaged(sample_count, interval: Duration, on_average)`. It returns
+  `LibreLinkUpError::InvalidConfig` if `sample_count` or `interval` is zero; before, these
+  produced a NaN average or a panic.
+- `LibreLinkUpClient::simple` takes `region: Option<&str>` instead of `Option<String>`.
+- `LibreLinkUpError`:
+  - `AuthFailed` is replaced by `InvalidConfig`. It was only ever returned for an empty
+    username or password, never for a failed login.
+  - `RegionNotFound` and `SerializationError` are removed; neither was ever returned.
+- The `utils` module is now private. Convert raw readings with
+  `LibreCgmData::try_from(&GlucoseItem)` or `LibreCgmData::try_from(&GlucoseMeasurement)`.
+
+### Added
+- `TryFrom<&GlucoseItem>` and `TryFrom<&GlucoseMeasurement>` for `LibreCgmData`.
+- `GlucoseMeasurement` and `DEFAULT_API_VERSION` are re-exported at the crate root.
+- Documentation for every error variant and every `ClientConfig` field.
+
 ## [0.1.0] - 2026-02-07
 
 ### Added

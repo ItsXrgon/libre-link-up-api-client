@@ -12,12 +12,14 @@ pub struct LogbookEntry {
     pub timestamp: String,
     #[serde(rename = "type")]
     pub entry_type: i32,
+    /// Glucose value in mg/dL, whatever the account's display unit.
     #[serde(rename = "ValueInMgPerDl")]
     pub value_in_mg_per_dl: f64,
     #[serde(rename = "MeasurementColor")]
     pub measurement_color: i32,
     #[serde(rename = "GlucoseUnits")]
     pub glucose_units: i32,
+    /// Glucose value in the account's display unit (see `glucose_units`: 0 = mg/dL, 1 = mmol/L).
     #[serde(rename = "Value")]
     pub value: f64,
     #[serde(rename = "isHigh")]

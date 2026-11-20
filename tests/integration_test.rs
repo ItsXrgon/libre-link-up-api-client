@@ -46,7 +46,7 @@ mod integration {
         println!("Read response: {:?}", result);
         match result {
             Ok(data) => {
-                assert!(data.current.value > 0.0);
+                assert!(data.current.value_mg_dl > 0.0);
                 assert!(!data.history.is_empty());
             }
             Err(e) => {
